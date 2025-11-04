@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+gat_matrix_permutation.py
+
+Compute fold-wise GAT (Generalization Across Time) matrices and perform
+cluster-based permutation tests to identify regions significantly different
+from chance level (0.5) in both directions.
+
+Requires: numpy, scipy, torch, pandas, sklearn, matplotlib, mne
+"""
+
+import os
+import re
+import numpy as np
+import torch
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from scipy import stats
+from scipy import sparse
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import RobustScaler
+from sklearn.metrics import roc_auc_score
+from mne.stats import permutation_cluster_1samp_test
+import seaborn as sns
+
+
+def load_activations(path):
+    """Load all .pt files under `path`, sorted by integer in filename."""
+    files = sorted(
+        [f for f in os.listdir(path) if not f.startswith(".")],
+        key=lambda fn: int(re.search(r"\d+", fn).group()),
+    )
+    return [torch.load(os.path.join(path, fn)) for fn in files]
+
+
+def extract_features(activation_files, layers):
+    """
+    Returns a DataFrame with one row per (sample, layer), containing:
+      - file_id: which activation file
+      - layer: layer index
+      - order: 1 for SVO, 0 for VSO
+      - before_*, after_*: 4 features each
+    """
+    rows = []
+    for file_id, f in enumerate(activation_files):
+        sentence = f["sentence"]
+        tokens = f["tokens"]
+        # find the clause boundary token
+        clause_tok = next(
+            (i for i, t in enumerate(tokens) if "ÏĢÎ¿Ïħ" in t), None
+        )
+        if clause_tok is None or clause_tok >= len(tokens) - 1:
+            continue
+
+        # determine SVO vs VSO
+        words = sentence.split()
+        aft_words = words[words.index("που") + 1 :]
+        order = (
+            1
+            if (
+                len(aft_words) >= 2
+                and aft_words[0].lower()
+                in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
+            )
+            else 0
+        )
+
+        for L in layers:
+            X = np.array(f["hidden_states"][L], dtype=float)
+            bef, aft = X[: clause_tok + 1], X[clause_tok + 1 :]
+
+            def feats(mat):
+                flat = mat.ravel()
+                return [
+                    flat.mean(),
+                    np.var(flat),
+                    stats.kurtosis(flat),
+                    stats.skew(flat),
+                ]
+
+            bef_feats = feats(bef)
+            aft_feats = feats(aft)
+
+            rows.append(
+                {
+                    "file_id": file_id,
+                    "layer": L,
+                    "order": order,
+                    **{f"bef_{i}": v for i, v in enumerate(bef_feats)},
+                    **{f"aft_{i}": v for i, v in enumerate(aft_feats)},
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def compute_gat_folds(df, layers, region_prefix="aft", n_splits=20):
+    """
+    Compute GAT matrix for each CV fold separately.
+    Returns array of shape (n_folds, n_layers, n_layers)
+    """
+    # pivot into a 3D array: samples × layers × features(4)
+    samples = df["file_id"].unique()
+    n_samples = len(samples)
+    n_layers = len(layers)
+    feats_arr = np.zeros((n_samples, n_layers, 4), dtype=float)
+    labels = np.zeros(n_samples, dtype=int)
+
+    # build a map file_id -> row index
+    id2idx = {fid: idx for idx, fid in enumerate(samples)}
+
+    for _, row in df.iterrows():
+        sidx = id2idx[row["file_id"]]
+        L = int(row["layer"])
+        labels[sidx] = row["order"]
+        # region features named "aft_0".."aft_3" or "bef_0".."bef_3"
+        feats_arr[sidx, L, :] = [row[f"{region_prefix}_{k}"] for k in range(4)]
+
+    # set up CV
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    fold_matrices = []
+
+    # compute GAT matrix for each fold
+    for fold_idx, (train_idx, test_idx) in enumerate(
+        skf.split(np.zeros(n_samples), labels)
+    ):
+        M_fold = np.zeros((n_layers, n_layers), dtype=float)
+
+        # loop over train/test layer pairs
+        for i, L_train in enumerate(layers):
+            for j, L_test in enumerate(layers):
+                Xtr = feats_arr[train_idx, i, :]
+                Xt = feats_arr[test_idx, j, :]
+                ytr = labels[train_idx]
+                yt = labels[test_idx]
+
+                # check if we have both classes in test set
+                if len(np.unique(yt)) < 2:
+                    M_fold[i, j] = np.nan
+                    continue
+
+                # scale & fit
+                scaler = RobustScaler().fit(Xtr)
+                clf = LogisticRegression(max_iter=1000, random_state=42)
+                clf.fit(scaler.transform(Xtr), ytr)
+                # predict & score
+                probs = clf.predict_proba(scaler.transform(Xt))[:, 1]
+                M_fold[i, j] = roc_auc_score(yt, probs)
+
+        fold_matrices.append(M_fold)
+
+    return np.array(fold_matrices)
+
+
+def perform_cluster_permutation_2d(
+    fold_matrices, alpha=0.05, n_permutations=5000
+):
+    """
+    Perform cluster-based permutation test on 2D GAT matrices.
+    Tests against null hypothesis that AUC = 0.5 (chance level).
+    """
+    n_folds, n_layers, _ = fold_matrices.shape
+
+    # Center data around 0.5 (chance level)
+    data_centered = fold_matrices - 0.5
+
+    # Handle NaNs by setting them to 0
+    data_centered = np.nan_to_num(data_centered)
+
+    # Flatten spatial dimensions for cluster test
+    # Shape: (n_folds, n_layers * n_layers)
+    data_flat = data_centered.reshape(n_folds, -1)
+
+    # Set up adjacency for 2D grid (each pixel connected to its 4 neighbors)
+    def get_2d_adjacency(n_rows, n_cols):
+        """Create adjacency matrix for 2D grid connectivity."""
+        n_points = n_rows * n_cols
+        row_indices = []
+        col_indices = []
+
+        for i in range(n_rows):
+            for j in range(n_cols):
+                idx = i * n_cols + j
+                # Connect to neighbors (4-connectivity)
+                if i > 0:  # up
+                    neighbor_idx = (i - 1) * n_cols + j
+                    row_indices.extend([idx, neighbor_idx])
+                    col_indices.extend([neighbor_idx, idx])
+                if i < n_rows - 1:  # down
+                    neighbor_idx = (i + 1) * n_cols + j
+                    row_indices.extend([idx, neighbor_idx])
+                    col_indices.extend([neighbor_idx, idx])
+                if j > 0:  # left
+                    neighbor_idx = i * n_cols + (j - 1)
+                    row_indices.extend([idx, neighbor_idx])
+                    col_indices.extend([neighbor_idx, idx])
+                if j < n_cols - 1:  # right
+                    neighbor_idx = i * n_cols + (j + 1)
+                    row_indices.extend([idx, neighbor_idx])
+                    col_indices.extend([neighbor_idx, idx])
+
+        # Create sparse matrix
+        data = np.ones(len(row_indices), dtype=bool)
+        adjacency = sparse.coo_matrix(
+            (data, (row_indices, col_indices)),
+            shape=(n_points, n_points),
+            dtype=bool,
+        )
+        return adjacency.tocsr()  # Convert to CSR format for efficiency
+
+    adjacency = get_2d_adjacency(n_layers, n_layers)
+
+    # Conservative t-threshold for two-tailed test
+    df = n_folds - 1
+    t_thresh = stats.t.ppf(1 - alpha / 2, df)
+
+    # Run cluster-based permutation test
+    T_obs, clusters, p_values, _ = permutation_cluster_1samp_test(
+        data_flat,
+        n_permutations=n_permutations,
+        threshold=t_thresh,
+        tail=0,  # two-tailed
+        adjacency=adjacency,
+        out_type="indices",
+        verbose=True,
+    )
+
+    # Reshape T_obs back to 2D
+    T_obs_2d = T_obs.reshape(n_layers, n_layers)
+
+    # Process significant clusters
+    sig_clusters_positive = []
+    sig_clusters_negative = []
+
+    for cluster, p_val in zip(clusters, p_values):
+        if p_val <= alpha:
+            cluster_indices = (
+                cluster[0] if isinstance(cluster, tuple) else cluster
+            )
+            # Convert flat indices back to 2D coordinates
+            coords_2d = [
+                (idx // n_layers, idx % n_layers) for idx in cluster_indices
+            ]
+
+            # Determine if cluster is positive or negative based on mean T value
+            cluster_t_values = T_obs[cluster_indices]
+            if cluster_t_values.mean() > 0:
+                sig_clusters_positive.append(
+                    (coords_2d, p_val, cluster_t_values.mean())
+                )
+            else:
+                sig_clusters_negative.append(
+                    (coords_2d, p_val, cluster_t_values.mean())
+                )
+
+    return {
+        "T_obs": T_obs_2d,
+        "mean_matrix": np.nanmean(fold_matrices, axis=0),
+        "std_matrix": np.nanstd(fold_matrices, axis=0),
+        "sig_clusters_positive": sig_clusters_positive,
+        "sig_clusters_negative": sig_clusters_negative,
+        "n_folds": n_folds,
+    }
+
+
+def plot_gat_with_clusters(results, layers):
+    """Plot GAT matrix with significant clusters highlighted as contours."""
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+
+    # Plot the GAT matrix as background
+    im = ax.imshow(
+        results["mean_matrix"],
+        origin="lower",
+        cmap="RdBu_r",
+        vmin=0,
+        vmax=1,
+        interpolation="nearest",
+        alpha=0.8,
+    )
+
+    # Create cluster masks
+    pos_mask = np.zeros_like(results["mean_matrix"])
+    neg_mask = np.zeros_like(results["mean_matrix"])
+
+    # Mark positive clusters (above chance)
+    for coords, p_val, t_mean in results["sig_clusters_positive"]:
+        for i, j in coords:
+            pos_mask[i, j] = 1
+
+    # Mark negative clusters (below chance)
+    for coords, p_val, t_mean in results["sig_clusters_negative"]:
+        for i, j in coords:
+            neg_mask[i, j] = 1
+
+    # Draw contours around significant clusters
+    if pos_mask.sum() > 0:
+        ax.contour(
+            pos_mask,
+            levels=[0.5],
+            colors=["red"],
+            linewidths=3,
+            linestyles="-",
+            alpha=0.9,
+        )
+        # Optionally add filled contours with low alpha
+        ax.contourf(pos_mask, levels=[0.5, 1.5], colors=["red"], alpha=0.2)
+
+    if neg_mask.sum() > 0:
+        ax.contour(
+            neg_mask,
+            levels=[0.5],
+            colors=["blue"],
+            linewidths=3,
+            linestyles="-",
+            alpha=0.9,
+        )
+        # Optionally add filled contours with low alpha
+        ax.contourf(neg_mask, levels=[0.5, 1.5], colors=["blue"], alpha=0.2)
+
+    # Add diagonal line for reference
+    ax.plot(
+        [0, len(layers) - 1],
+        [0, len(layers) - 1],
+        "k--",
+        alpha=0.5,
+        linewidth=1,
+    )
+
+    # Colorbar
+    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label("AUC", rotation=270, labelpad=20, fontsize=12)
+
+    # Labels and title
+    ax.set_xlabel("Test Layer", fontsize=14, fontweight="bold")
+    ax.set_ylabel("Train Layer", fontsize=14, fontweight="bold")
+    ax.set_title(
+        "Generalization Across Layers",
+        fontsize=16,
+        fontweight="bold",
+        pad=20,
+    )
+
+    # Set ticks
+    tick_positions = list(range(0, len(layers), 4))
+    tick_labels = [str(layers[i]) for i in tick_positions]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels)
+    ax.set_yticks(tick_positions)
+    ax.set_yticklabels(tick_labels)
+
+    # Create custom legend for clusters
+    legend_elements = []
+    if results["sig_clusters_positive"]:
+        legend_elements.append(
+            plt.Line2D(
+                [0],
+                [0],
+                color="red",
+                lw=3,
+                label="Above chance (p<0.01)",
+            )
+        )
+    if results["sig_clusters_negative"]:
+        legend_elements.append(
+            plt.Line2D(
+                [0],
+                [0],
+                color="blue",
+                lw=3,
+                label="Below chance (p<0.01)",
+            )
+        )
+
+    if legend_elements:
+        ax.legend(
+            handles=legend_elements,
+            loc="upper right",
+            frameon=True,
+            fancybox=True,
+            shadow=True,
+            fontsize=10,
+        )
+
+    plt.tight_layout()
+    plt.show()
+
+    # Print cluster information
+    print("\n=== SIGNIFICANT CLUSTERS ===")
+    print(f"Total folds: {results['n_folds']}")
+
+    if results["sig_clusters_positive"]:
+        print(f"\nPositive clusters (AUC > 0.5):")
+        for i, (coords, p_val, t_mean) in enumerate(
+            results["sig_clusters_positive"]
+        ):
+            print(
+                f"  Cluster {i+1}: {len(coords)} pixels, p = {p_val:.4f}, t = {t_mean:.3f}"
+            )
+            # Show layer ranges
+            train_layers = sorted(set(coord[0] for coord in coords))
+            test_layers = sorted(set(coord[1] for coord in coords))
+            print(
+                f"    Train layers: {train_layers[0]}-{train_layers[-1]}, Test layers: {test_layers[0]}-{test_layers[-1]}"
+            )
+    else:
+        print("\nNo significant positive clusters found.")
+
+    if results["sig_clusters_negative"]:
+        print(f"\nNegative clusters (AUC < 0.5):")
+        for i, (coords, p_val, t_mean) in enumerate(
+            results["sig_clusters_negative"]
+        ):
+            print(
+                f"  Cluster {i+1}: {len(coords)} pixels, p = {p_val:.4f}, t = {t_mean:.3f}"
+            )
+            # Show layer ranges
+            train_layers = sorted(set(coord[0] for coord in coords))
+            test_layers = sorted(set(coord[1] for coord in coords))
+            print(
+                f"    Train layers: {train_layers[0]}-{train_layers[-1]}, Test layers: {test_layers[0]}-{test_layers[-1]}"
+            )
+    else:
+        print("\nNo significant negative clusters found.")
+
+
+def main():
+    # Settings
+    path_to_data = os.path.join("..", "activations")
+    layers = list(range(32))
+    n_folds = 20
+    alpha = 0.05
+    n_permutations = 5000
+
+    print(f"Loading activations from {path_to_data}...")
+    # Load data and extract features
+    activ_files = load_activations(path_to_data)
+    df_feats = extract_features(activ_files, layers)
+
+    print(f"Computing GAT matrices for {n_folds} folds...")
+    # Compute fold-wise GAT matrices
+    fold_matrices = compute_gat_folds(
+        df_feats, layers, region_prefix="aft", n_splits=n_folds
+    )
+
+    print(
+        f"Running cluster-based permutation test with {n_permutations} permutations..."
+    )
+    # Perform cluster-based permutation test
+    results = perform_cluster_permutation_2d(
+        fold_matrices, alpha=alpha, n_permutations=n_permutations
+    )
+
+    print("Plotting results...")
+    # Plot results
+    plot_gat_with_clusters(results, layers)
+
+
+if __name__ == "__main__":
+    main()
