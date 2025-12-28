@@ -292,19 +292,79 @@ class Experiment:
 # =============================================================================
 # MAIN
 # =============================================================================
-experiment = Experiment(
-    num_cells=4,
-    presentation_time=200,  # ms
-    soa=366,  # ms
-    question_display_time=200,  # ms
-    response_time=500,  # ms
-)
+def main():
+    import argparse
 
-all_cells = experiment.generate_multiple_cells()
-experiment.print_summary(all_cells)
+    parser = argparse.ArgumentParser(
+        description="Generate counterbalanced Greek sentence stimuli for SVO/VSO word order experiments."
+    )
+    parser.add_argument(
+        "--num_cells",
+        type=int,
+        default=4,
+        help="Number of experimental cells (default: 4)",
+    )
+    parser.add_argument(
+        "--presentation_time",
+        type=int,
+        default=200,
+        help="Word presentation time in milliseconds (default: 200)",
+    )
+    parser.add_argument(
+        "--soa",
+        type=int,
+        default=366,
+        help="Stimulus Onset Asynchrony in milliseconds (default: 366)",
+    )
+    parser.add_argument(
+        "--question_display_time",
+        type=int,
+        default=200,
+        help="Question display time in milliseconds (default: 200)",
+    )
+    parser.add_argument(
+        "--response_time",
+        type=int,
+        default=500,
+        help="Response time window in milliseconds (default: 500)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="../../stimuli",
+        help="Output directory for stimuli CSV file (default: ../../stimuli)",
+    )
+    parser.add_argument(
+        "--output_filename",
+        type=str,
+        default="greek_sentences.csv",
+        help="Output CSV filename (default: greek_sentences.csv)",
+    )
+    args = parser.parse_args()
+
+    experiment = Experiment(
+        num_cells=args.num_cells,
+        presentation_time=args.presentation_time,
+        soa=args.soa,
+        question_display_time=args.question_display_time,
+        response_time=args.response_time,
+    )
+
+    print("Generating stimuli...")
+    all_cells = experiment.generate_multiple_cells()
+    experiment.print_summary(all_cells)
+
+    # Create and inspect the DataFrame
+    df_all_cells = experiment.create_dataframe(all_cells)
+    
+    # Store the dataframe
+    path_to_stimuli = args.output_dir
+    if not os.path.exists(path_to_stimuli):
+        os.makedirs(path_to_stimuli)
+    fname = os.path.join(path_to_stimuli, args.output_filename)
+    df_all_cells.to_csv(fname)
+    print(f"\nStimuli saved to: {fname}")
 
 
-# Create and inspect the DataFrame
-df_all_cells = experiment.create_dataframe(all_cells)
-# Store the dataframe
-experiment.store_dataframe(df_all_cells)
+if __name__ == "__main__":
+    main()

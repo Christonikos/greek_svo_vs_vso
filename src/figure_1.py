@@ -9,11 +9,11 @@ are significant at α = 0.05 (two‐tailed), using a conservative t‐threshold 
 
 Requires: numpy, scipy, torch, pandas, sklearn, matplotlib, mne
 """
-
-import osw
+import os
 import re
 import numpy as np
 import torch
+import pandas as pd
 from scipy import stats
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
@@ -21,16 +21,20 @@ from sklearn.preprocessing import RobustScaler
 from sklearn.metrics import roc_auc_score
 import matplotlib.pyplot as plt
 from mne.stats import permutation_cluster_1samp_test
+import seaborn as sns
 
+POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
 
 def extract_layer_data(activation_files, layer_idx):
     results = []
     for f in activation_files:
         tokens = f["tokens"]
         clause_token_pos = next(
-            (i for i, t in enumerate(tokens) if "ÏĢÎ¿Ïħ" in t), None
+            (i for i, t in enumerate(tokens) if any(pou_token in t for pou_token in POU_TOKENS)), 
+            None
         )
         if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
+            print("clause_token_pos not found")
             continue
 
         words = f["sentence"].split()
@@ -43,7 +47,7 @@ def extract_layer_data(activation_files, layer_idx):
             else "VSO"
         )
 
-        X = np.array(f["hidden_states"][layer_idx], dtype=float)
+        X = np.array(f["hidden_states"][layer_idx], dtype=np.float64)
         bef, aft = X[: clause_token_pos + 1], X[clause_token_pos + 1 :]
 
         def feats(mat, pfx):
@@ -62,14 +66,16 @@ def extract_layer_data(activation_files, layer_idx):
 
     if not results:
         return None
-    import pandas as pd
-
     return pd.DataFrame(results)
 
 
 def stratified_cv_auc_multifeature(df, region, return_folds=False):
     cols = [f"{region}_{stat}" for stat in ("mean", "range", "min", "max")]
     X = df[cols].values
+
+    # Clean any remaining invalid values
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
     y = (df["order"] == "SVO").astype(int).values
     if len(df) < 10 or len(np.unique(y)) < 2:
         return (np.nan, np.nan, []) if return_folds else (np.nan, np.nan)
@@ -105,12 +111,56 @@ def load_activations(path):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate Figure 1: Sentence type classification per layer with cluster-based permutation tests."
+    )
+    parser.add_argument(
+        "--activations_path",
+        type=str,
+        default="krikri_activations",
+        help="Path to activation files directory (default: krikri_activations)",
+    )
+    parser.add_argument(
+        "--n_layers",
+        type=int,
+        default=32,
+        help="Number of layers in the model (default: 32)",
+    )
+    parser.add_argument(
+        "--n_folds",
+        type=int,
+        default=20,
+        help="Number of cross-validation folds (default: 20)",
+    )
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.01,
+        help="Significance level for cluster tests (default: 0.01)",
+    )
+    parser.add_argument(
+        "--n_permutations",
+        type=int,
+        default=5000,
+        help="Number of permutations for cluster tests (default: 5000)",
+    )
+    parser.add_argument(
+        "--output_prefix",
+        type=str,
+        default="figure_1",
+        help="Output filename prefix (default: figure_1)",
+    )
+    args = parser.parse_args()
+
+    os.makedirs("figures", exist_ok=True)
     # ─── Settings ───────────────────────────────────────────────────────────────
-    path_to_data = os.path.join("..", "activations")
-    layers = list(range(32))
+    path_to_data = args.activations_path
+    layers = list(range(args.n_layers))
     regions = ["before", "after"]
-    n_folds = 20
-    alpha = 0.01
+    n_folds = args.n_folds
+    alpha = args.alpha
     df = n_folds - 1
     # two‐tailed critical t for α=0.01:
     t_thresh = stats.t.ppf(1 - alpha / 2, df)
@@ -302,8 +352,6 @@ def main():
     )
 
     # Proper despine using seaborn
-    import seaborn as sns
-
     sns.despine(ax=ax, trim=True, offset=10)
 
     # No grid
@@ -319,14 +367,14 @@ def main():
 
     # High-quality output
     plt.savefig(
-        "figure_1.pdf",
+        f"figures/{args.output_prefix}.pdf",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
         edgecolor="none",
     )
     plt.savefig(
-        "figure_1.png",
+        f"figures/{args.output_prefix}.png",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",

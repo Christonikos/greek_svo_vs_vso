@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-final_clean_figure.py
-
 Final clean visualization and table for the generalization analysis.
 Shows systematic inversion pattern where classifier confidence is systematically wrong.
 """
@@ -23,18 +21,25 @@ from prettytable import PrettyTable
 import pandas as pd
 
 
+POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
+
 def extract_layer_data(activation_files, layer_idx):
     """Extract features from a specific layer"""
     results = []
     for f in activation_files:
         tokens = f["tokens"]
         clause_token_pos = next(
-            (i for i, t in enumerate(tokens) if "ÏĢÎ¿Ïħ" in t), None
+            (i for i, t in enumerate(tokens) if any(pou_token in t for pou_token in POU_TOKENS)), 
+            None
         )
         if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
             continue
 
         words = f["sentence"].split()
+        if "που" not in words:
+            print("'που' not in words")
+            continue
+
         after = words[words.index("που") + 1 :]
         order = (
             "SVO"
@@ -44,11 +49,17 @@ def extract_layer_data(activation_files, layer_idx):
             else "VSO"
         )
 
-        X = np.array(f["hidden_states"][layer_idx], dtype=float)
+        X = np.asarray(f["hidden_states"][layer_idx], dtype=np.float64)
+        # Check for invalid values
+        if not np.isfinite(X).all():
+            continue
+
         bef, aft = X[: clause_token_pos + 1], X[clause_token_pos + 1 :]
 
         def feats(mat, pfx):
             flat = mat.ravel()
+            flat = np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
+
             return {
                 f"{pfx}_mean": flat.mean(),
                 f"{pfx}_range": np.var(flat),
@@ -77,12 +88,17 @@ def extract_pooled_layer_features(
         for f in activation_files:
             tokens = f["tokens"]
             clause_token_pos = next(
-                (i for i, t in enumerate(tokens) if "ÏĢÎ¿Ïħ" in t), None
+                (i for i, t in enumerate(tokens) if any(pou_token in t for pou_token in POU_TOKENS)), 
+                None
             )
             if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
                 continue
 
             words = f["sentence"].split()
+            if "που" not in words:
+                print(f"ERROR: 'που' not found in {f['sentence']}. Skipping.")
+                continue
+
             after = words[words.index("που") + 1 :]
             order = (
                 "SVO"
@@ -92,10 +108,16 @@ def extract_pooled_layer_features(
                 else "VSO"
             )
 
-            X = np.array(f["hidden_states"][layer_idx], dtype=float)
+            X = np.array(f["hidden_states"][layer_idx], dtype=np.float64)
+            # Check for invalid values
+            if not np.isfinite(X).all():
+                continue
+
             bef, aft = X[: clause_token_pos + 1], X[clause_token_pos + 1 :]
             mat = bef if region == "before" else aft
             flat = mat.ravel()
+            # Replace any remaining inf/nan with 0
+            flat = np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
 
             feats = [
                 flat.mean(),
@@ -117,6 +139,8 @@ def train_classifier_on_layers(activation_files, train_layers, region="after"):
 
     if len(X_train) < 10 or len(np.unique(y_train)) < 2:
         return None, None
+
+    X_train = np.nan_to_num(X_train, nan=0.0, posinf=0.0, neginf=0.0)
 
     scaler = RobustScaler()
     X_train_scaled = scaler.fit_transform(X_train)
@@ -229,7 +253,7 @@ def get_cluster_significance(auc_folds_data, test_layers, alpha=0.01):
         return []
 
 
-def plot_clean_auc(test_layers, aucs, sems, sig_clusters):
+def plot_clean_auc(test_layers, aucs, sems, sig_clusters, output_prefix):
     """Plot clean AUC only with figure_1.py aesthetics"""
     # Match figure_1.py style exactly
     plt.style.use("default")
@@ -353,14 +377,14 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters):
 
     # High-quality output - same as figure_1.py
     plt.savefig(
-        "figure_3_final.pdf",
+        f"figures/{output_prefix}.pdf",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
         edgecolor="none",
     )
     plt.savefig(
-        "figure_3_final.png",
+        f"figures/{output_prefix}.png",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
@@ -540,10 +564,66 @@ def load_activations(path):
 
 
 def main():
-    path_to_data = os.path.join("..", "activations")
-    train_layers = list(range(20, 32))
-    test_layers = list(range(0, 20))
-    region = "after"
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate Figure 3: Generalization analysis showing systematic inversion pattern."
+    )
+    parser.add_argument(
+        "--activations_path",
+        type=str,
+        default="krikri_activations",
+        help="Path to activation files directory (default: krikri_activations)",
+    )
+    parser.add_argument(
+        "--train_layers_start",
+        type=int,
+        default=20,
+        help="Start layer for training (default: 20)",
+    )
+    parser.add_argument(
+        "--train_layers_end",
+        type=int,
+        default=32,
+        help="End layer for training (default: 32)",
+    )
+    parser.add_argument(
+        "--test_layers_start",
+        type=int,
+        default=0,
+        help="Start layer for testing (default: 0)",
+    )
+    parser.add_argument(
+        "--test_layers_end",
+        type=int,
+        default=20,
+        help="End layer for testing (default: 20)",
+    )
+    parser.add_argument(
+        "--region",
+        type=str,
+        default="after",
+        choices=["after", "before"],
+        help="Region to analyze: after (post-clause) or before (pre-clause) (default: after)",
+    )
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.01,
+        help="Significance level for cluster tests (default: 0.01)",
+    )
+    parser.add_argument(
+        "--output_prefix",
+        type=str,
+        default="figure_3",
+        help="Output filename prefix (default: figure_3)",
+    )
+    args = parser.parse_args()
+
+    path_to_data = args.activations_path
+    train_layers = list(range(args.train_layers_start, args.train_layers_end))
+    test_layers = list(range(args.test_layers_start, args.test_layers_end))
+    region = args.region
 
     print("Loading activation data...")
     activations = load_activations(path_to_data)
@@ -578,13 +658,14 @@ def main():
 
     # Option 1: Clean AUC plot
     print("Option 1: Clean AUC Plot")
-    plot_clean_auc(test_layers, np.array(aucs), np.array(sems), sig_clusters)
+    plot_clean_auc(test_layers, np.array(aucs), np.array(sems), sig_clusters, args.output_prefix)
 
     # Option 2: Simple bias table
     print("\nOption 2: Simple Bias Table")
     bias_data = create_simple_bias_table(
         activations, clf, scaler, test_layers, region
     )
+    print(bias_data)
 
     # Option 3: Even simpler summary
     print("\nOption 3: Simplest Summary")

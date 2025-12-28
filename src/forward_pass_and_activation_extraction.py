@@ -1,5 +1,4 @@
 import pandas as pd
-import os
 from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
