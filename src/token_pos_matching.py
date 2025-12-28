@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Token-POS Matching Script 
+Token-POS Matching Script
 
-This script provides accurate matching of parts of speech with their 
+This script provides accurate matching of parts of speech with their
 corresponding tokens, handling multi-token words properly.
 
 """
 import argparse
-import pandas as pd
-import numpy as np
-import torch
 import os
-from typing import List, Tuple, Optional
 from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import torch
 
 
 @dataclass
@@ -280,11 +281,7 @@ class TokenPOSMatcher:
         # Get positions for the requested word type
         positions = getattr(match, f"{word_type}_positions", None)
         if word_type == "pou":
-            positions = (
-                [match.pou_position]
-                if match.pou_position is not None
-                else None
-            )
+            positions = [match.pou_position] if match.pou_position is not None else None
 
         if not positions:
             return None
@@ -319,9 +316,7 @@ class TokenPOSMatcher:
 
         return all_matches
 
-    def save__matches_to_csv(
-        self, matches: List[TokenMatch], output_path: str
-    ):
+    def save__matches_to_csv(self, matches: List[TokenMatch], output_path: str):
         """
         Save  token matches to a CSV file.
 
@@ -365,17 +360,13 @@ class TokenPOSMatcher:
                 "v2_tokens": str(match.v2_tokens),
                 # Token counts
                 "det_n1_token_count": (
-                    len(match.det_n1_positions)
-                    if match.det_n1_positions
-                    else 0
+                    len(match.det_n1_positions) if match.det_n1_positions else 0
                 ),
                 "n1_token_count": (
                     len(match.n1_positions) if match.n1_positions else 0
                 ),
                 "det_n2_token_count": (
-                    len(match.det_n2_positions)
-                    if match.det_n2_positions
-                    else 0
+                    len(match.det_n2_positions) if match.det_n2_positions else 0
                 ),
                 "n2_token_count": (
                     len(match.n2_positions) if match.n2_positions else 0
@@ -397,41 +388,41 @@ class TokenPOSMatcher:
 def main():
     """Main function to demonstrate usage."""
     parser = argparse.ArgumentParser(description="Token-POS Matching Analysis")
-    
+
     parser.add_argument(
         "--stimuli-path",
         type=str,
         default="../stimuli/greek_sentences.csv",
-        help="Path to the stimuli CSV file (default: ../stimuli/greek_sentences.csv)"
+        help="Path to the stimuli CSV file (default: ../stimuli/greek_sentences.csv)",
     )
     parser.add_argument(
         "--activations-path",
         type=str,
         default="../activations",
-        help="Path to the activations directory (default: ../activations)"
+        help="Path to the activations directory (default: ../activations)",
     )
     parser.add_argument(
         "--output-path",
         type=str,
         default="../token_pos_matches.csv",
-        help="Path to save output CSV (default: ../token_pos_matches.csv)"
+        help="Path to save output CSV (default: ../token_pos_matches.csv)",
     )
     parser.add_argument(
         "--sentence-ids",
         type=int,
         nargs="+",
         default=[0, 1, 2],
-        help="Sentence IDs to analyze in detail (default: 0 1 2)"
+        help="Sentence IDs to analyze in detail (default: 0 1 2)",
     )
     parser.add_argument(
         "--layer-idx",
         type=int,
         default=0,
-        help="Layer index for activation extraction (default: 0)"
+        help="Layer index for activation extraction (default: 0)",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Create matcher
     matcher = TokenPOSMatcher(args.stimuli_path, args.activations_path)
 

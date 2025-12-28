@@ -11,27 +11,33 @@ Requires: numpy, scipy, torch, pandas, sklearn, matplotlib, mne
 """
 import os
 import re
+
+import matplotlib.pyplot as plt
 import numpy as np
-import torch
 import pandas as pd
+import seaborn as sns
+import torch
+from mne.stats import permutation_cluster_1samp_test
 from scipy import stats
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import roc_auc_score
-import matplotlib.pyplot as plt
-from mne.stats import permutation_cluster_1samp_test
-import seaborn as sns
 
 POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
+
 
 def extract_layer_data(activation_files, layer_idx):
     results = []
     for f in activation_files:
         tokens = f["tokens"]
         clause_token_pos = next(
-            (i for i, t in enumerate(tokens) if any(pou_token in t for pou_token in POU_TOKENS)), 
-            None
+            (
+                i
+                for i, t in enumerate(tokens)
+                if any(pou_token in t for pou_token in POU_TOKENS)
+            ),
+            None,
         )
         if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
             print("clause_token_pos not found")
@@ -42,8 +48,7 @@ def extract_layer_data(activation_files, layer_idx):
         order = (
             "SVO"
             if len(after) >= 2
-            and after[0].lower()
-            in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
+            and after[0].lower() in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
             else "VSO"
         )
 
@@ -295,9 +300,7 @@ def main():
                 )
 
     # Chance level line
-    ax.axhline(
-        0.5, linestyle="-", color="black", linewidth=1, alpha=0.5, zorder=2
-    )
+    ax.axhline(0.5, linestyle="-", color="black", linewidth=1, alpha=0.5, zorder=2)
 
     # Proper axis settings - y-axis from 0.2 to 1
     ax.set_xlim(0, len(layers) - 1)
@@ -321,9 +324,7 @@ def main():
     ax.set_xticks(range(0, len(layers), 4))
     ax.set_xticklabels(range(0, len(layers), 4), fontsize=10, color="black")
     ax.set_yticks([0.3, 0.4, 0.6, 0.8, 1.0])
-    ax.set_yticklabels(
-        ["0.2", "0.4", "0.6", "0.8", "1.0"], fontsize=10, color="black"
-    )
+    ax.set_yticklabels(["0.2", "0.4", "0.6", "0.8", "1.0"], fontsize=10, color="black")
 
     # Create custom legend with significance
     from matplotlib.lines import Line2D
@@ -347,9 +348,7 @@ def main():
         ),
         Line2D([0], [0], color="gray", linewidth=8, label="p < 0.01"),
     ]
-    ax.legend(
-        handles=legend_elements, loc="upper right", frameon=False, fontsize=11
-    )
+    ax.legend(handles=legend_elements, loc="upper right", frameon=False, fontsize=11)
 
     # Proper despine using seaborn
     sns.despine(ax=ax, trim=True, offset=10)

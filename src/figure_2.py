@@ -12,21 +12,20 @@ Requires: numpy, scipy, torch, pandas, sklearn, matplotlib, mne
 
 import os
 import re
-import numpy as np
-import torch
-import pandas as pd
-import matplotlib.pyplot as plt
 
-from scipy import stats
-from scipy import sparse
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+from mne.stats import permutation_cluster_1samp_test
+from scipy import sparse, stats
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import roc_auc_score
-from mne.stats import permutation_cluster_1samp_test
-
 
 POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
+
 
 def load_activations(path):
     """Load all .pt files under `path`, sorted by integer in filename."""
@@ -51,8 +50,12 @@ def extract_features(activation_files, layers):
         tokens = f["tokens"]
         # find the clause boundary token
         clause_tok = next(
-            (i for i, t in enumerate(tokens) if any(pou_token in t for pou_token in POU_TOKENS)), 
-            None
+            (
+                i
+                for i, t in enumerate(tokens)
+                if any(pou_token in t for pou_token in POU_TOKENS)
+            ),
+            None,
         )
         if clause_tok is None or clause_tok >= len(tokens) - 1:
             continue
@@ -81,13 +84,13 @@ def extract_features(activation_files, layers):
                 var_val = np.var(flat)
                 kurt_val = stats.kurtosis(flat)
                 skew_val = stats.skew(flat)
-                
+
                 # Replace inf/nan with finite values
                 mean_val = np.nan_to_num(mean_val, nan=0.0, posinf=1e10, neginf=-1e10)
                 var_val = np.nan_to_num(var_val, nan=0.0, posinf=1e10, neginf=-1e10)
                 kurt_val = np.nan_to_num(kurt_val, nan=0.0, posinf=1e10, neginf=-1e10)
                 skew_val = np.nan_to_num(skew_val, nan=0.0, posinf=1e10, neginf=-1e10)
-                
+
                 return [mean_val, var_val, kurt_val, skew_val]
 
             bef_feats = feats(bef)
@@ -164,9 +167,7 @@ def compute_gat_folds(df, layers, region_prefix="aft", n_splits=20):
     return np.array(fold_matrices)
 
 
-def perform_cluster_permutation_2d(
-    fold_matrices, alpha=0.05, n_permutations=5000
-):
+def perform_cluster_permutation_2d(fold_matrices, alpha=0.05, n_permutations=5000):
     """
     Perform cluster-based permutation test on 2D GAT matrices.
     Tests against null hypothesis that AUC = 0.5 (chance level).
@@ -246,13 +247,9 @@ def perform_cluster_permutation_2d(
 
     for cluster, p_val in zip(clusters, p_values):
         if p_val <= alpha:
-            cluster_indices = (
-                cluster[0] if isinstance(cluster, tuple) else cluster
-            )
+            cluster_indices = cluster[0] if isinstance(cluster, tuple) else cluster
             # Convert flat indices back to 2D coordinates
-            coords_2d = [
-                (idx // n_layers, idx % n_layers) for idx in cluster_indices
-            ]
+            coords_2d = [(idx // n_layers, idx % n_layers) for idx in cluster_indices]
 
             # Determine if cluster is positive or negative based on mean T value
             cluster_t_values = T_obs[cluster_indices]
@@ -419,9 +416,7 @@ def plot_gat_with_clusters(results, layers, output_prefix):
 
     if results["sig_clusters_positive"]:
         print(f"\nPositive clusters (AUC > 0.5):")
-        for i, (coords, p_val, t_mean) in enumerate(
-            results["sig_clusters_positive"]
-        ):
+        for i, (coords, p_val, t_mean) in enumerate(results["sig_clusters_positive"]):
             print(
                 f"  Cluster {i+1}: {len(coords)} pixels, p = {p_val:.4f}, t = {t_mean:.3f}"
             )
@@ -436,9 +431,7 @@ def plot_gat_with_clusters(results, layers, output_prefix):
 
     if results["sig_clusters_negative"]:
         print(f"\nNegative clusters (AUC < 0.5):")
-        for i, (coords, p_val, t_mean) in enumerate(
-            results["sig_clusters_negative"]
-        ):
+        for i, (coords, p_val, t_mean) in enumerate(results["sig_clusters_negative"]):
             print(
                 f"  Cluster {i+1}: {len(coords)} pixels, p = {p_val:.4f}, t = {t_mean:.3f}"
             )

@@ -1,8 +1,9 @@
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 def load_greek_sentences(csv_path="../stimuli/greek_sentences.csv"):
@@ -45,9 +46,7 @@ def load_model_and_tokenizer(
 
     print(f"Loading model '{model_name}' on device: {device}")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name, output_hidden_states=True
-    )
+    model = AutoModelForCausalLM.from_pretrained(model_name, output_hidden_states=True)
     model.to(device)
     model.eval()
 
@@ -71,14 +70,10 @@ def extract_activations_for_sentence(
         )
 
     # outputs.hidden_states -> tuple(length = num_layers + 1)
-    hidden_states = (
-        outputs.hidden_states
-    )  # each tensor: (batch, seq_len, hidden_size)
+    hidden_states = outputs.hidden_states  # each tensor: (batch, seq_len, hidden_size)
 
     # Move to CPU and half precision to save memory
-    hidden_states_cpu = [
-        hs.squeeze(0).to("cpu").half() for hs in hidden_states
-    ]
+    hidden_states_cpu = [hs.squeeze(0).to("cpu").half() for hs in hidden_states]
 
     # Tokens list for reference
     tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"].squeeze(0))
@@ -103,9 +98,7 @@ def process_and_save_activations(
     save_path = Path(__file__).parent / save_dir
     save_path.mkdir(exist_ok=True)
 
-    for idx, row in tqdm(
-        df.iterrows(), total=len(df), desc="Processing sentences"
-    ):
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing sentences"):
         activations = extract_activations_for_sentence(
             row["Sentence"], model, tokenizer, device
         )

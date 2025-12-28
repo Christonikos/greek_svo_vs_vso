@@ -7,21 +7,22 @@ Shows systematic inversion pattern where classifier confidence is systematically
 
 import os
 import re
-import numpy as np
-import torch
-from scipy import stats
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
-from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import roc_auc_score
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
+import torch
 from mne.stats import permutation_cluster_1samp_test
 from prettytable import PrettyTable
-import pandas as pd
-
+from scipy import stats
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import RobustScaler
 
 POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
+
 
 def extract_layer_data(activation_files, layer_idx):
     """Extract features from a specific layer"""
@@ -29,8 +30,12 @@ def extract_layer_data(activation_files, layer_idx):
     for f in activation_files:
         tokens = f["tokens"]
         clause_token_pos = next(
-            (i for i, t in enumerate(tokens) if any(pou_token in t for pou_token in POU_TOKENS)), 
-            None
+            (
+                i
+                for i, t in enumerate(tokens)
+                if any(pou_token in t for pou_token in POU_TOKENS)
+            ),
+            None,
         )
         if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
             continue
@@ -44,8 +49,7 @@ def extract_layer_data(activation_files, layer_idx):
         order = (
             "SVO"
             if len(after) >= 2
-            and after[0].lower()
-            in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
+            and after[0].lower() in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
             else "VSO"
         )
 
@@ -77,9 +81,7 @@ def extract_layer_data(activation_files, layer_idx):
     return pd.DataFrame(results)
 
 
-def extract_pooled_layer_features(
-    activation_files, layer_indices, region="after"
-):
+def extract_pooled_layer_features(activation_files, layer_indices, region="after"):
     """Pool samples from multiple layers"""
     all_features = []
     labels = []
@@ -88,8 +90,12 @@ def extract_pooled_layer_features(
         for f in activation_files:
             tokens = f["tokens"]
             clause_token_pos = next(
-                (i for i, t in enumerate(tokens) if any(pou_token in t for pou_token in POU_TOKENS)), 
-                None
+                (
+                    i
+                    for i, t in enumerate(tokens)
+                    if any(pou_token in t for pou_token in POU_TOKENS)
+                ),
+                None,
             )
             if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
                 continue
@@ -257,17 +263,17 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters, output_prefix):
     """Plot clean AUC only with figure_1.py aesthetics"""
     # Match figure_1.py style exactly
     plt.style.use("default")
-    
+
     # Create figure with clean proportions (same as figure_1.py)
     fig, ax = plt.subplots(figsize=(8, 6))
-    
+
     # Set clean white background (same as figure_1.py)
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
-    
+
     # Use the same color as "after" region from figure_1.py
     color = "#6B73FF"  # Blue color from figure_1.py
-    
+
     layers = np.array(test_layers)
     valid_mask = ~np.isnan(aucs)
     valid_layers = layers[valid_mask]
@@ -301,7 +307,11 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters, output_prefix):
             cluster_layers = layers[cluster_idx]
             start, end = cluster_layers.min(), cluster_layers.max()
             # Thick line above the curve - same style as figure_1.py
-            y_line = np.max(valid_aucs[np.isin(valid_layers, cluster_layers)]) + np.max(valid_sems[np.isin(valid_layers, cluster_layers)]) + 0.03
+            y_line = (
+                np.max(valid_aucs[np.isin(valid_layers, cluster_layers)])
+                + np.max(valid_sems[np.isin(valid_layers, cluster_layers)])
+                + 0.03
+            )
             ax.plot(
                 [start, end],
                 [y_line, y_line],
@@ -312,9 +322,7 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters, output_prefix):
             )
 
     # Chance level line - same as figure_1.py
-    ax.axhline(
-        0.5, linestyle="-", color="black", linewidth=1, alpha=0.5, zorder=2
-    )
+    ax.axhline(0.5, linestyle="-", color="black", linewidth=1, alpha=0.5, zorder=2)
 
     # Proper axis settings - match figure_1.py style
     ax.set_xlim(0, len(test_layers) - 1)
@@ -343,6 +351,7 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters, output_prefix):
     # Create custom legend with significance - same as figure_1.py
     if sig_clusters:
         from matplotlib.lines import Line2D
+
         legend_elements = [
             Line2D(
                 [0],
@@ -363,7 +372,7 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters, output_prefix):
 
     # No grid - same as figure_1.py
     ax.grid(False)
-    
+
     # Title with same styling as figure_1.py
     ax.set_title(
         "Generalization analysis: systematic inversion.",
@@ -371,7 +380,7 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters, output_prefix):
         fontweight="bold",
         pad=20,
     )
-    
+
     # Perfect spacing - same as figure_1.py
     plt.tight_layout()
 
@@ -430,14 +439,10 @@ def create_simple_bias_table(
 
     # Calculate percentages
     vso_predicted_as_svo = (
-        100
-        * np.sum(np.array(all_vso_predictions) == 1)
-        / len(all_vso_predictions)
+        100 * np.sum(np.array(all_vso_predictions) == 1) / len(all_vso_predictions)
     )
     svo_predicted_as_svo = (
-        100
-        * np.sum(np.array(all_svo_predictions) == 1)
-        / len(all_svo_predictions)
+        100 * np.sum(np.array(all_svo_predictions) == 1) / len(all_svo_predictions)
     )
 
     # Create simple table
@@ -533,9 +538,7 @@ def create_even_simpler_summary(
         total_correct += correct
         total_wrong += wrong
 
-    svo_bias = (
-        100 * np.sum(y_pred == 1) / len(y_pred)
-    )  # From last layer as example
+    svo_bias = 100 * np.sum(y_pred == 1) / len(y_pred)  # From last layer as example
     accuracy = 100 * total_correct / total_samples
     error_rate = 100 * total_wrong / total_samples
 
@@ -629,9 +632,7 @@ def main():
     activations = load_activations(path_to_data)
     print(f"Loaded {len(activations)} activation files")
 
-    print(
-        f"Training classifier on layers {train_layers[0]}-{train_layers[-1]}..."
-    )
+    print(f"Training classifier on layers {train_layers[0]}-{train_layers[-1]}...")
     clf, scaler = train_classifier_on_layers(activations, train_layers, region)
 
     if clf is None:
@@ -658,13 +659,13 @@ def main():
 
     # Option 1: Clean AUC plot
     print("Option 1: Clean AUC Plot")
-    plot_clean_auc(test_layers, np.array(aucs), np.array(sems), sig_clusters, args.output_prefix)
+    plot_clean_auc(
+        test_layers, np.array(aucs), np.array(sems), sig_clusters, args.output_prefix
+    )
 
     # Option 2: Simple bias table
     print("\nOption 2: Simple Bias Table")
-    bias_data = create_simple_bias_table(
-        activations, clf, scaler, test_layers, region
-    )
+    bias_data = create_simple_bias_table(activations, clf, scaler, test_layers, region)
     print(bias_data)
 
     # Option 3: Even simpler summary

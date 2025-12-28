@@ -1,6 +1,6 @@
 import argparse
-from transformers import AutoConfig
 
+from transformers import AutoConfig
 
 parser = argparse.ArgumentParser(
     description="Run probing / evaluation on a Hugging Face model."
@@ -18,7 +18,7 @@ args = parser.parse_args()
 cfg = AutoConfig.from_pretrained(args.model_id)
 
 num_hidden_layers = getattr(cfg, "num_hidden_layers", None)
-if num_hidden_layers:                   
+if num_hidden_layers:
     print("num_hidden_layers:", getattr(cfg, "num_hidden_layers", None))
 else:
     print(cfg)
