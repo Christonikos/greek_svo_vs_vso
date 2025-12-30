@@ -1,0 +1,214 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2761
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 # Stanford Agentic Reviewer - View Review\
+\
+```\
+paperreview.ai /review\
+```\
+## Probing Transformer Dynamics With Greek Scrambling: Resolving\
+\
+## Syntactic Transformation Under Semantic Equivalence\
+\
+```\
+ACL Submitted: December 21, 2025\
+```\
+## Summary\
+\
+```\
+The paper probes how syntactic word-order information (SVO vs. VSO) unfolds across layers\
+of a Greek-tuned transformer (Llama-Krikri-8B-Instruct) using tightly controlled object-relative\
+minimal pairs that preserve meaning while varying only order. Linear probes trained on simple\
+distributional summaries of hidden states show that sentence-type information is not decodable\
+before the clause boundary, peaks in middle layers with broad cross-layer generalization, and\
+becomes less linearly decodable in late layers; decision boundaries learned on late layers do\
+not transfer to earlier layers. The authors interpret this as evidence for a mid-layer \'93structural\
+zone\'94 and a late \'93semanticization,\'94 offering hypotheses about staged, interactive computation\
+that can be linked to human neurocognitive timing.\
+```\
+## Strengths\
+\
+```\
+Technical novelty and innovation\
+The use of Greek scrambling minimal pairs to keep meaning constant while varying\
+word order is well-motivated and typologically informative for probing syntax\'96\
+semantics dissociation.\
+Anchoring analyses to a clause-initial complementizer and explicitly contrasting pre-\
+vs. post-clause regions is a clear design to localize when structure becomes\
+decodable.\
+Experimental rigor and validation\
+Layer-wise and cross-layer generalization analyses, including cluster-based\
+permutation statistics, provide a coherent picture of mid-layer concentration and\
+late-layer reorganization.\
+The late-to-early generalization failure adds a useful negative-transfer diagnostic,\
+complementing the cross-layer generalization matrix.\
+```\
+\
+```\
+Clarity of presentation\
+The high-level motivation, relation to neurocognitive components (ELAN/LAN,\
+N400/P600), and the staged/interactive interpretation are articulated clearly and\
+cautiously framed as hypotheses rather than direct mappings.\
+Methods are generally described in sufficient detail to understand how features and\
+probes were constructed.\
+Significance of contributions\
+The study adds a language- and phenomenon-specific case (Greek scrambling) to\
+a growing body of work showing mid-layer concentration of structural information,\
+thereby enriching cross-linguistic evidence.\
+It contributes to the debate on serial vs. interactive processing in models and\
+suggests concrete follow-ups for causal testing (e.g., activation patching in the\
+\'93structural zone\'94).\
+```\
+## Weaknesses\
+\
+```\
+Technical limitations or concerns\
+The probing approach reduces each sentence-layer region to four global moments\
+(mean, variance, skewness, kurtosis) of flattened activations, discarding token and\
+positional structure; achieving very high AUC (~0.9) from such coarse summaries\
+raises concerns about confounds or probe artifacts.\
+Only a single instruction-tuned model is studied; instruction tuning and bilingual\
+training may bias representational dynamics, and no base-model or multi-model\
+replication is provided.\
+Experimental gaps or methodological issues\
+Dataset size is small (128 sentences across 32 conditions), and 10-fold CV over\
+such a small pool risks instability; significance testing over folds rather than items is\
+a weak unit of analysis.\
+There are no probe selectivity controls (e.g., random-label controls, control tasks\
+per Hewitt & Liang/Pimentel et al.), no untrained-model baseline, and no checks for\
+length/tokenization imbalances or surface heuristics.\
+The claim that pre-clause decoding is at chance is plausible, but the inclusion of the\
+complementizer in the \'93before\'94 region is a design choice that should be justified\
+further; more granular token- or position-level analyses would strengthen the\
+localization claim.\
+Clarity or presentation issues\
+Some internal inconsistencies (e.g., \'93These layer-by-position activations constitute\
+the sole inputs\'94 vs. global moment summaries; references to \'93Appendix ??\'94;\
+placeholder table artifacts) detract from polish.\
+Details on the exact layer count and model configuration (e.g., confirming 32\
+transformer blocks; attention/MLP specs) could be clarified for reproducibility.\
+```\
+\
+```\
+Missing related work or comparisons\
+The work would benefit from engaging more directly with the probing literature on\
+layerwise grammatical decodability and probe selectivity (e.g., decoding probing;\
+control tasks; information-theoretic probing).\
+Comparisons to other word-order-flexible settings and benchmarks (e.g., TurBLiMP;\
+Spanish word-order generation-order work) and to recent layer\'96EEG dynamics\
+papers would situate the findings more firmly and calibrate novelty.\
+```\
+## Detailed Comments\
+\
+```\
+Technical soundness evaluation\
+The core design\'97minimal pairs in Greek that vary order under semantic\
+equivalence\'97is strong for isolating syntactic form. The clause boundary anchoring\
+is sensible and likely drives the clean pre-/post-clause contrast.\
+However, the probe aggregates rich, structured hidden-state tensors into four global\
+moments. Such aggressive compression can conflate multiple factors (e.g., token\
+count, position-specific activation magnitudes, frequency- or tokenization-driven\
+shifts) and makes interpretation difficult: why should a global mean or kurtosis\
+scalar track a structural label so strongly? Without selectivity controls (randomized\
+labels, matched-length controls, unsupervised subspace baselines), it is hard to\
+rule out degenerate cues.\
+Statistical inference uses cluster-based permutation over folds rather than items.\
+Since folds share the same items across layers, the independence assumptions are\
+unclear. A more appropriate item-level bootstrap or hierarchical permutation (over\
+items and layers) is recommended.\
+Experimental evaluation assessment\
+Single-model results limit generalizability. Prior work shows mid-layer peaks for\
+syntax in many models (e.g., decoding probing on BLiMP; speech-model minimal\
+pairs; semantic anomaly detection mid\'96late), so replication on a base LLaMA-3.1-\
+8B, a non-instruction-tuned Greek model (if available), and at least one multilingual\
+baseline would strengthen claims.\
+The very small dataset (128 sentences) and strong reported AUC invite concerns\
+about overfitting or spurious correlations. Reporting per-condition performance,\
+length/subword-count parity, and tokenization diagnostics would help.\
+Additional probes (simple MLP; linear probes on token- or position-specific\
+summaries; RSA) could cross-validate the main effect and test whether\
+\'93semanticization\'94 is a linear separability loss or a geometric re-embedding.\
+```\
+\
+```\
+Comparison with related work (using the summaries provided)\
+He et al. (decoding probing, 2403.17299) and He et al. (speech minimal pairs,\
+2509.15655) both find linguistic decodability peaking in lower\'96middle to middle\
+layers with late degradation for some objectives, consistent with the mid-layer\
+\'93structural zone\'94 reported here. Positioning your results as a typological extension\
+(Greek scrambling) would be accurate and strengthen claims by citing these\
+precedents.\
+Zacharopoulos & Kyriakoglou (2511.19232) show semantic anomaly detection in\
+mid\'96late layers with earlier geometry changes; your findings complement theirs by\
+focusing on syntactic order under semantic invariance. A joint discussion could\
+clarify how \'93semantic anomaly\'94 vs. \'93syntactic order\'94 are temporally distributed\
+across layers.\
+The Spanish generation-order analysis (2502.14451) highlights causal-model\
+biases toward SVO and suggests that decoder-only objectives may narrow surface\
+variability; discussing whether Llama-Krikri exhibits an English/SVO bias would\
+contextualize your late-layer \'93semanticization\'94 claim.\
+TurBLiMP (2506.13487) demonstrates that flexible word order and subordination\
+stress test models; linking your controlled Greek paradigm to broader typological\
+benchmarks would increase relevance and motivate future cross-lingual tests.\
+The large-scale brain\'96model dynamics study (2509.24307) finds middle-to-high-\
+layer alignment with N400-like timing; while your mapping from layers to EEG\
+components is necessarily indirect, acknowledging these dynamics and proposing\
+concrete co-analyses (e.g., vRSA time-by-layer alignment) would enhance the\
+neurocognitive claims.\
+Discussion of broader impact and significance\
+The study advances a principled approach to isolating syntactic information and\
+suggests a credible layerwise computation story: early emergence post-cue, mid-\
+layer stabilization, late reorganization. This aligns with the broader literature and\
+can guide causal mechanistic experiments (activation patching, head ablations)\
+inside the identified \'93structural zone.\'94\
+The main risk is over-interpretation: given the coarse probing features and limited\
+dataset, the strength of the neurocognitive mapping should be described as\
+suggestive. Strengthening selectivity and cross-model replication will make the\
+proposed staged/interactive account more compelling and robust.\
+```\
+## Questions for Authors\
+\
+1. How do you ensure that the high AUC from four global moments is not driven by trivial\
+    confounds (e.g., subword-length differences, position-specific magnitude shifts, or\
+    residual tokenization imbalances)? Can you report length/subword parity and a random-\
+    label control AUC?\
+\
+\
+2. Why aggregate to global moment features instead of position-aware or token-level\
+    summaries? Do token-specific linear probes (e.g., on verb vs. noun positions) yield\
+    consistent mid-layer peaks?\
+3. Can you include selectivity controls (e.g., control tasks following Hewitt & Liang; an\
+    untrained or randomly reinitialized model baseline; a base LLaMA-3.1-8B probe) to\
+    assess whether the probe exploits true structure rather than superficial cues?\
+4. How stable are the findings across larger datasets (beyond 128 items) and across model\
+    variants (base vs. instruction-tuned, monolingual vs. multilingual)? Any preliminary\
+    evidence?\
+5. The \'93before\'94 region includes the complementizer. Would excluding the complementizer or\
+    probing at finer temporal slices (per token or sliding windows) change the locus and\
+    onset of decodability?\
+6. Can you quantify the \'93semanticization\'94 claim with geometry metrics (e.g., RSA, CKA with\
+    semantic features, participation ratio) to show that linear separability decreases while\
+    other structure persists in late layers?\
+7. Do late-to-early negative transfer results persist when using nonlinear probes or when\
+    conditioning on balanced tokenization/length?\
+\
+## Overall Assessment\
+\
+This is a timely and well-motivated study that leverages a clever Greek scrambling paradigm to\
+cleanly probe syntactic structure formation in a strong Greek-capable LLM. The main empirical\
+patterns\'97no decodability pre-clause, mid-layer concentration with broad cross-layer\
+generalization, and late-layer reorganization\'97are consistent with and add typological breadth\
+to prior layerwise probing literature. However, key methodological choices (extreme\
+compression to four global moments, small dataset, lack of selectivity controls and multi-model\
+replication) limit the strength of the causal and mechanistic claims. The paper is promising and\
+conceptually valuable, but to meet ACL\'92s standards I recommend revision to include stronger\
+controls, broader replication, more granular analyses, and clearer statistical procedures. With\
+these improvements, the work could make a solid, well-supported contribution to the discourse\
+on staged and interactive computation in LLMs and its relation to human processing.\
+\
+\
+}
