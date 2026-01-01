@@ -12,19 +12,19 @@ Requires: numpy, scipy, torch, pandas, sklearn, matplotlib, mne
 
 import os
 import re
-import numpy as np
-import torch
-import pandas as pd
-import matplotlib.pyplot as plt
 
-from scipy import stats
-from scipy import sparse
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
+from mne.stats import permutation_cluster_1samp_test
+from scipy import sparse, stats
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import roc_auc_score
-from mne.stats import permutation_cluster_1samp_test
-import seaborn as sns
+
+POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
 
 
 def load_activations(path):
@@ -50,7 +50,12 @@ def extract_features(activation_files, layers):
         tokens = f["tokens"]
         # find the clause boundary token
         clause_tok = next(
-            (i for i, t in enumerate(tokens) if "ÏĢÎ¿Ïħ" in t), None
+            (
+                i
+                for i, t in enumerate(tokens)
+                if any(pou_token in t for pou_token in POU_TOKENS)
+            ),
+            None,
         )
         if clause_tok is None or clause_tok >= len(tokens) - 1:
             continue
@@ -69,17 +74,24 @@ def extract_features(activation_files, layers):
         )
 
         for L in layers:
-            X = np.array(f["hidden_states"][L], dtype=float)
+            X = np.array(f["hidden_states"][L], dtype=np.float64)
             bef, aft = X[: clause_tok + 1], X[clause_tok + 1 :]
 
             def feats(mat):
                 flat = mat.ravel()
-                return [
-                    flat.mean(),
-                    np.var(flat),
-                    stats.kurtosis(flat),
-                    stats.skew(flat),
-                ]
+                # Compute features and handle inf/nan
+                mean_val = flat.mean()
+                var_val = np.var(flat)
+                kurt_val = stats.kurtosis(flat)
+                skew_val = stats.skew(flat)
+
+                # Replace inf/nan with finite values
+                mean_val = np.nan_to_num(mean_val, nan=0.0, posinf=1e10, neginf=-1e10)
+                var_val = np.nan_to_num(var_val, nan=0.0, posinf=1e10, neginf=-1e10)
+                kurt_val = np.nan_to_num(kurt_val, nan=0.0, posinf=1e10, neginf=-1e10)
+                skew_val = np.nan_to_num(skew_val, nan=0.0, posinf=1e10, neginf=-1e10)
+
+                return [mean_val, var_val, kurt_val, skew_val]
 
             bef_feats = feats(bef)
             aft_feats = feats(aft)
@@ -106,7 +118,7 @@ def compute_gat_folds(df, layers, region_prefix="aft", n_splits=20):
     samples = df["file_id"].unique()
     n_samples = len(samples)
     n_layers = len(layers)
-    feats_arr = np.zeros((n_samples, n_layers, 4), dtype=float)
+    feats_arr = np.zeros((n_samples, n_layers, 4), dtype=np.float64)
     labels = np.zeros(n_samples, dtype=int)
 
     # build a map file_id -> row index
@@ -127,7 +139,7 @@ def compute_gat_folds(df, layers, region_prefix="aft", n_splits=20):
     for fold_idx, (train_idx, test_idx) in enumerate(
         skf.split(np.zeros(n_samples), labels)
     ):
-        M_fold = np.zeros((n_layers, n_layers), dtype=float)
+        M_fold = np.zeros((n_layers, n_layers), dtype=np.float64)
 
         # loop over train/test layer pairs
         for i, L_train in enumerate(layers):
@@ -155,9 +167,7 @@ def compute_gat_folds(df, layers, region_prefix="aft", n_splits=20):
     return np.array(fold_matrices)
 
 
-def perform_cluster_permutation_2d(
-    fold_matrices, alpha=0.05, n_permutations=5000
-):
+def perform_cluster_permutation_2d(fold_matrices, alpha=0.05, n_permutations=5000):
     """
     Perform cluster-based permutation test on 2D GAT matrices.
     Tests against null hypothesis that AUC = 0.5 (chance level).
@@ -237,13 +247,9 @@ def perform_cluster_permutation_2d(
 
     for cluster, p_val in zip(clusters, p_values):
         if p_val <= alpha:
-            cluster_indices = (
-                cluster[0] if isinstance(cluster, tuple) else cluster
-            )
+            cluster_indices = cluster[0] if isinstance(cluster, tuple) else cluster
             # Convert flat indices back to 2D coordinates
-            coords_2d = [
-                (idx // n_layers, idx % n_layers) for idx in cluster_indices
-            ]
+            coords_2d = [(idx // n_layers, idx % n_layers) for idx in cluster_indices]
 
             # Determine if cluster is positive or negative based on mean T value
             cluster_t_values = T_obs[cluster_indices]
@@ -266,7 +272,7 @@ def perform_cluster_permutation_2d(
     }
 
 
-def plot_gat_with_clusters(results, layers):
+def plot_gat_with_clusters(results, layers, output_prefix):
     """Plot GAT matrix with significant clusters highlighted as contours."""
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
@@ -385,6 +391,23 @@ def plot_gat_with_clusters(results, layers):
         )
 
     plt.tight_layout()
+
+    # High-quality output
+    plt.savefig(
+        f"figures/{output_prefix}.pdf",
+        dpi=300,
+        bbox_inches="tight",
+        facecolor="white",
+        edgecolor="none",
+    )
+    plt.savefig(
+        f"figures/{output_prefix}.png",
+        dpi=300,
+        bbox_inches="tight",
+        facecolor="white",
+        edgecolor="none",
+    )
+
     plt.show()
 
     # Print cluster information
@@ -393,9 +416,7 @@ def plot_gat_with_clusters(results, layers):
 
     if results["sig_clusters_positive"]:
         print(f"\nPositive clusters (AUC > 0.5):")
-        for i, (coords, p_val, t_mean) in enumerate(
-            results["sig_clusters_positive"]
-        ):
+        for i, (coords, p_val, t_mean) in enumerate(results["sig_clusters_positive"]):
             print(
                 f"  Cluster {i+1}: {len(coords)} pixels, p = {p_val:.4f}, t = {t_mean:.3f}"
             )
@@ -410,9 +431,7 @@ def plot_gat_with_clusters(results, layers):
 
     if results["sig_clusters_negative"]:
         print(f"\nNegative clusters (AUC < 0.5):")
-        for i, (coords, p_val, t_mean) in enumerate(
-            results["sig_clusters_negative"]
-        ):
+        for i, (coords, p_val, t_mean) in enumerate(results["sig_clusters_negative"]):
             print(
                 f"  Cluster {i+1}: {len(coords)} pixels, p = {p_val:.4f}, t = {t_mean:.3f}"
             )
@@ -427,12 +446,62 @@ def plot_gat_with_clusters(results, layers):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate Figure 2: Generalization Across Time (GAT) matrix with cluster-based permutation tests."
+    )
+    parser.add_argument(
+        "--activations_path",
+        type=str,
+        default="krikri_activations",
+        help="Path to activation files directory (default: krikri_activations)",
+    )
+    parser.add_argument(
+        "--n_layers",
+        type=int,
+        default=32,
+        help="Number of layers in the model (default: 32)",
+    )
+    parser.add_argument(
+        "--n_folds",
+        type=int,
+        default=20,
+        help="Number of cross-validation folds (default: 20)",
+    )
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.05,
+        help="Significance level for cluster tests (default: 0.05)",
+    )
+    parser.add_argument(
+        "--n_permutations",
+        type=int,
+        default=5000,
+        help="Number of permutations for cluster tests (default: 5000)",
+    )
+    parser.add_argument(
+        "--region",
+        type=str,
+        default="aft",
+        choices=["aft", "bef"],
+        help="Region to analyze: aft (post-clause) or bef (pre-clause) (default: aft)",
+    )
+    parser.add_argument(
+        "--output_prefix",
+        type=str,
+        default="figure_2",
+        help="Output filename prefix (default: figure_2)",
+    )
+    args = parser.parse_args()
+
     # Settings
-    path_to_data = os.path.join("..", "activations")
-    layers = list(range(32))
-    n_folds = 20
-    alpha = 0.05
-    n_permutations = 5000
+    path_to_data = args.activations_path
+    layers = list(range(args.n_layers))
+    n_folds = args.n_folds
+    alpha = args.alpha
+    n_permutations = args.n_permutations
 
     print(f"Loading activations from {path_to_data}...")
     # Load data and extract features
@@ -454,8 +523,7 @@ def main():
     )
 
     print("Plotting results...")
-    # Plot results
-    plot_gat_with_clusters(results, layers)
+    plot_gat_with_clusters(results, layers, args.output_prefix)
 
 
 if __name__ == "__main__":

@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Token-POS Matching Script 
+Token-POS Matching Script
 
-This script provides accurate matching of parts of speech with their 
+This script provides accurate matching of parts of speech with their
 corresponding tokens, handling multi-token words properly.
 
 """
-
-import pandas as pd
-import numpy as np
-import torch
+import argparse
 import os
-from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import torch
 
 
 @dataclass
@@ -65,9 +66,7 @@ class TokenPOSMatcher:
         self.stimuli_df = pd.read_csv(stimuli_path)
 
         # Constants for token patterns
-        self.POU_TOKEN = "ĠÏĢÎ¿Ïħ"  # The consistent 'που' token
-        self.BOS_TOKEN = "<|begin_of_text|>"
-        self.PERIOD_TOKEN = "."
+        self.POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]  # 'που' token
 
     def _decode_token_sequence(self, tokens: List[str]) -> str:
         """
@@ -86,40 +85,6 @@ class TokenPOSMatcher:
 
         # This is a simplified decoding - in practice, you'd need proper tokenizer decoding
         return combined
-
-    def _find_word_boundaries(
-        self, tokens: List[str], sentence_words: List[str]
-    ) -> List[Tuple[int, int]]:
-        """
-        Find word boundaries in the token sequence based on the original sentence words.
-        Returns list of (start_pos, end_pos) tuples for each word.
-        """
-        boundaries = []
-
-        # Find 'που' position first as anchor
-        pou_pos = None
-        for i, token in enumerate(tokens):
-            if token == self.POU_TOKEN:
-                pou_pos = i
-                break
-
-        if pou_pos is None:
-            raise ValueError("Could not find 'που' token")
-
-        # The structure is: [BOS] Det_N1 N1_tokens... 'που' [rest...]
-        # We know 'που' is at pou_pos, so we can work backwards and forwards
-
-        # Before 'που': should be Det_N1 and N1 tokens
-        # After 'που': depends on SVO vs VSO order
-
-        # For now, return a simplified boundary detection
-        # This would need more sophisticated logic for full accuracy
-        boundaries.append((1, 2))  # Det_N1 (assuming single token)
-        boundaries.append((2, pou_pos))  # N1 (from pos 2 to pou_pos)
-        boundaries.append((pou_pos, pou_pos + 1))  # 'που'
-
-        # The rest depends on sentence structure and would need more analysis
-        return boundaries
 
     def match_sentence_tokens_(self, sentence_id: int) -> TokenMatch:
         """
@@ -169,14 +134,14 @@ class TokenPOSMatcher:
 
         # Find 'που' position as anchor
         for i, token in enumerate(tokens):
-            if token == self.POU_TOKEN:
+            if token in self.POU_TOKENS:
                 match.pou_position = i
                 match.pou_token = token
                 break
 
         if match.pou_position is None:
             raise ValueError(
-                f"Could not find 'που' token in sentence {sentence_id}"
+                f"Could not find 'που' token in sentence {sentence_id}, {tokens}"
             )
 
         # Parse sentence structure
@@ -316,11 +281,7 @@ class TokenPOSMatcher:
         # Get positions for the requested word type
         positions = getattr(match, f"{word_type}_positions", None)
         if word_type == "pou":
-            positions = (
-                [match.pou_position]
-                if match.pou_position is not None
-                else None
-            )
+            positions = [match.pou_position] if match.pou_position is not None else None
 
         if not positions:
             return None
@@ -355,9 +316,7 @@ class TokenPOSMatcher:
 
         return all_matches
 
-    def save__matches_to_csv(
-        self, matches: List[TokenMatch], output_path: str
-    ):
+    def save__matches_to_csv(self, matches: List[TokenMatch], output_path: str):
         """
         Save  token matches to a CSV file.
 
@@ -401,17 +360,13 @@ class TokenPOSMatcher:
                 "v2_tokens": str(match.v2_tokens),
                 # Token counts
                 "det_n1_token_count": (
-                    len(match.det_n1_positions)
-                    if match.det_n1_positions
-                    else 0
+                    len(match.det_n1_positions) if match.det_n1_positions else 0
                 ),
                 "n1_token_count": (
                     len(match.n1_positions) if match.n1_positions else 0
                 ),
                 "det_n2_token_count": (
-                    len(match.det_n2_positions)
-                    if match.det_n2_positions
-                    else 0
+                    len(match.det_n2_positions) if match.det_n2_positions else 0
                 ),
                 "n2_token_count": (
                     len(match.n2_positions) if match.n2_positions else 0
@@ -431,25 +386,57 @@ class TokenPOSMatcher:
 
 
 def main():
-    """Main function to demonstrate  usage."""
-    # Initialize paths
-    stimuli_path = "../stimuli/greek_sentences.csv"
-    activations_path = "../activations"
+    """Main function to demonstrate usage."""
+    parser = argparse.ArgumentParser(description="Token-POS Matching Analysis")
 
-    # Create  matcher
-    matcher = TokenPOSMatcher(stimuli_path, activations_path)
+    parser.add_argument(
+        "--stimuli-path",
+        type=str,
+        default="../stimuli/greek_sentences.csv",
+        help="Path to the stimuli CSV file (default: ../stimuli/greek_sentences.csv)",
+    )
+    parser.add_argument(
+        "--activations-path",
+        type=str,
+        default="../activations",
+        help="Path to the activations directory (default: ../activations)",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=str,
+        default="../token_pos_matches.csv",
+        help="Path to save output CSV (default: ../token_pos_matches.csv)",
+    )
+    parser.add_argument(
+        "--sentence-ids",
+        type=int,
+        nargs="+",
+        default=[0, 1, 2],
+        help="Sentence IDs to analyze in detail (default: 0 1 2)",
+    )
+    parser.add_argument(
+        "--layer-idx",
+        type=int,
+        default=0,
+        help="Layer index for activation extraction (default: 0)",
+    )
 
-    # Analyze first few sentences in detail
-    print("===  Token-POS Matching Analysis ===")
+    args = parser.parse_args()
 
-    for sentence_id in [0, 1, 2]:
+    # Create matcher
+    matcher = TokenPOSMatcher(args.stimuli_path, args.activations_path)
+
+    # Analyze specified sentences in detail
+    print("=== Token-POS Matching Analysis ===")
+
+    for sentence_id in args.sentence_ids:
         try:
             match = matcher.match_sentence_tokens_(sentence_id)
             matcher.print__summary(match)
 
             # Example: Get activation for N1
             n1_activation = matcher.get_activation_for_word(
-                match, "n1", layer_idx=0
+                match, "n1", layer_idx=args.layer_idx
             )
             if n1_activation is not None:
                 print(f"  N1 activation shape: {n1_activation.shape}")
@@ -462,11 +449,10 @@ def main():
     all_matches = matcher.process_all_sentences()
 
     # Save results to CSV
-    output_path = "../token_pos_matches.csv"
-    matcher.save__matches_to_csv(all_matches, output_path)
+    matcher.save__matches_to_csv(all_matches, args.output_path)
 
     print(f"\nProcessed {len(all_matches)} sentences successfully!")
-    print(f"Results saved to: {output_path}")
+    print(f"Results saved to: {args.output_path}")
 
 
 if __name__ == "__main__":

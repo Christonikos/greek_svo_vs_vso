@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-final_clean_figure.py
-
 Final clean visualization and table for the generalization analysis.
 Shows systematic inversion pattern where classifier confidence is systematically wrong.
 """
 
 import os
 import re
-import numpy as np
-import torch
-from scipy import stats
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
-from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import roc_auc_score
+
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
+import torch
 from mne.stats import permutation_cluster_1samp_test
 from prettytable import PrettyTable
-import pandas as pd
+from scipy import stats
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import RobustScaler
+
+POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
 
 
 def extract_layer_data(activation_files, layer_idx):
@@ -29,26 +30,40 @@ def extract_layer_data(activation_files, layer_idx):
     for f in activation_files:
         tokens = f["tokens"]
         clause_token_pos = next(
-            (i for i, t in enumerate(tokens) if "ÏĢÎ¿Ïħ" in t), None
+            (
+                i
+                for i, t in enumerate(tokens)
+                if any(pou_token in t for pou_token in POU_TOKENS)
+            ),
+            None,
         )
         if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
             continue
 
         words = f["sentence"].split()
+        if "που" not in words:
+            print("'που' not in words")
+            continue
+
         after = words[words.index("που") + 1 :]
         order = (
             "SVO"
             if len(after) >= 2
-            and after[0].lower()
-            in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
+            and after[0].lower() in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
             else "VSO"
         )
 
-        X = np.array(f["hidden_states"][layer_idx], dtype=float)
+        X = np.asarray(f["hidden_states"][layer_idx], dtype=np.float64)
+        # Check for invalid values
+        if not np.isfinite(X).all():
+            continue
+
         bef, aft = X[: clause_token_pos + 1], X[clause_token_pos + 1 :]
 
         def feats(mat, pfx):
             flat = mat.ravel()
+            flat = np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
+
             return {
                 f"{pfx}_mean": flat.mean(),
                 f"{pfx}_range": np.var(flat),
@@ -66,9 +81,7 @@ def extract_layer_data(activation_files, layer_idx):
     return pd.DataFrame(results)
 
 
-def extract_pooled_layer_features(
-    activation_files, layer_indices, region="after"
-):
+def extract_pooled_layer_features(activation_files, layer_indices, region="after"):
     """Pool samples from multiple layers"""
     all_features = []
     labels = []
@@ -77,12 +90,21 @@ def extract_pooled_layer_features(
         for f in activation_files:
             tokens = f["tokens"]
             clause_token_pos = next(
-                (i for i, t in enumerate(tokens) if "ÏĢÎ¿Ïħ" in t), None
+                (
+                    i
+                    for i, t in enumerate(tokens)
+                    if any(pou_token in t for pou_token in POU_TOKENS)
+                ),
+                None,
             )
             if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
                 continue
 
             words = f["sentence"].split()
+            if "που" not in words:
+                print(f"ERROR: 'που' not found in {f['sentence']}. Skipping.")
+                continue
+
             after = words[words.index("που") + 1 :]
             order = (
                 "SVO"
@@ -92,10 +114,16 @@ def extract_pooled_layer_features(
                 else "VSO"
             )
 
-            X = np.array(f["hidden_states"][layer_idx], dtype=float)
+            X = np.array(f["hidden_states"][layer_idx], dtype=np.float64)
+            # Check for invalid values
+            if not np.isfinite(X).all():
+                continue
+
             bef, aft = X[: clause_token_pos + 1], X[clause_token_pos + 1 :]
             mat = bef if region == "before" else aft
             flat = mat.ravel()
+            # Replace any remaining inf/nan with 0
+            flat = np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
 
             feats = [
                 flat.mean(),
@@ -117,6 +145,8 @@ def train_classifier_on_layers(activation_files, train_layers, region="after"):
 
     if len(X_train) < 10 or len(np.unique(y_train)) < 2:
         return None, None
+
+    X_train = np.nan_to_num(X_train, nan=0.0, posinf=0.0, neginf=0.0)
 
     scaler = RobustScaler()
     X_train_scaled = scaler.fit_transform(X_train)
@@ -229,21 +259,21 @@ def get_cluster_significance(auc_folds_data, test_layers, alpha=0.01):
         return []
 
 
-def plot_clean_auc(test_layers, aucs, sems, sig_clusters):
+def plot_clean_auc(test_layers, aucs, sems, sig_clusters, output_prefix):
     """Plot clean AUC only with figure_1.py aesthetics"""
     # Match figure_1.py style exactly
     plt.style.use("default")
-    
+
     # Create figure with clean proportions (same as figure_1.py)
     fig, ax = plt.subplots(figsize=(8, 6))
-    
+
     # Set clean white background (same as figure_1.py)
     fig.patch.set_facecolor("white")
     ax.set_facecolor("white")
-    
+
     # Use the same color as "after" region from figure_1.py
     color = "#6B73FF"  # Blue color from figure_1.py
-    
+
     layers = np.array(test_layers)
     valid_mask = ~np.isnan(aucs)
     valid_layers = layers[valid_mask]
@@ -277,7 +307,11 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters):
             cluster_layers = layers[cluster_idx]
             start, end = cluster_layers.min(), cluster_layers.max()
             # Thick line above the curve - same style as figure_1.py
-            y_line = np.max(valid_aucs[np.isin(valid_layers, cluster_layers)]) + np.max(valid_sems[np.isin(valid_layers, cluster_layers)]) + 0.03
+            y_line = (
+                np.max(valid_aucs[np.isin(valid_layers, cluster_layers)])
+                + np.max(valid_sems[np.isin(valid_layers, cluster_layers)])
+                + 0.03
+            )
             ax.plot(
                 [start, end],
                 [y_line, y_line],
@@ -288,9 +322,7 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters):
             )
 
     # Chance level line - same as figure_1.py
-    ax.axhline(
-        0.5, linestyle="-", color="black", linewidth=1, alpha=0.5, zorder=2
-    )
+    ax.axhline(0.5, linestyle="-", color="black", linewidth=1, alpha=0.5, zorder=2)
 
     # Proper axis settings - match figure_1.py style
     ax.set_xlim(0, len(test_layers) - 1)
@@ -319,6 +351,7 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters):
     # Create custom legend with significance - same as figure_1.py
     if sig_clusters:
         from matplotlib.lines import Line2D
+
         legend_elements = [
             Line2D(
                 [0],
@@ -339,7 +372,7 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters):
 
     # No grid - same as figure_1.py
     ax.grid(False)
-    
+
     # Title with same styling as figure_1.py
     ax.set_title(
         "Generalization analysis: systematic inversion.",
@@ -347,20 +380,20 @@ def plot_clean_auc(test_layers, aucs, sems, sig_clusters):
         fontweight="bold",
         pad=20,
     )
-    
+
     # Perfect spacing - same as figure_1.py
     plt.tight_layout()
 
     # High-quality output - same as figure_1.py
     plt.savefig(
-        "figure_3_final.pdf",
+        f"figures/{output_prefix}.pdf",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
         edgecolor="none",
     )
     plt.savefig(
-        "figure_3_final.png",
+        f"figures/{output_prefix}.png",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
@@ -406,14 +439,10 @@ def create_simple_bias_table(
 
     # Calculate percentages
     vso_predicted_as_svo = (
-        100
-        * np.sum(np.array(all_vso_predictions) == 1)
-        / len(all_vso_predictions)
+        100 * np.sum(np.array(all_vso_predictions) == 1) / len(all_vso_predictions)
     )
     svo_predicted_as_svo = (
-        100
-        * np.sum(np.array(all_svo_predictions) == 1)
-        / len(all_svo_predictions)
+        100 * np.sum(np.array(all_svo_predictions) == 1) / len(all_svo_predictions)
     )
 
     # Create simple table
@@ -509,9 +538,7 @@ def create_even_simpler_summary(
         total_correct += correct
         total_wrong += wrong
 
-    svo_bias = (
-        100 * np.sum(y_pred == 1) / len(y_pred)
-    )  # From last layer as example
+    svo_bias = 100 * np.sum(y_pred == 1) / len(y_pred)  # From last layer as example
     accuracy = 100 * total_correct / total_samples
     error_rate = 100 * total_wrong / total_samples
 
@@ -540,18 +567,72 @@ def load_activations(path):
 
 
 def main():
-    path_to_data = os.path.join("..", "activations")
-    train_layers = list(range(20, 32))
-    test_layers = list(range(0, 20))
-    region = "after"
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate Figure 3: Generalization analysis showing systematic inversion pattern."
+    )
+    parser.add_argument(
+        "--activations_path",
+        type=str,
+        default="krikri_activations",
+        help="Path to activation files directory (default: krikri_activations)",
+    )
+    parser.add_argument(
+        "--train_layers_start",
+        type=int,
+        default=20,
+        help="Start layer for training (default: 20)",
+    )
+    parser.add_argument(
+        "--train_layers_end",
+        type=int,
+        default=32,
+        help="End layer for training (default: 32)",
+    )
+    parser.add_argument(
+        "--test_layers_start",
+        type=int,
+        default=0,
+        help="Start layer for testing (default: 0)",
+    )
+    parser.add_argument(
+        "--test_layers_end",
+        type=int,
+        default=20,
+        help="End layer for testing (default: 20)",
+    )
+    parser.add_argument(
+        "--region",
+        type=str,
+        default="after",
+        choices=["after", "before"],
+        help="Region to analyze: after (post-clause) or before (pre-clause) (default: after)",
+    )
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.01,
+        help="Significance level for cluster tests (default: 0.01)",
+    )
+    parser.add_argument(
+        "--output_prefix",
+        type=str,
+        default="figure_3",
+        help="Output filename prefix (default: figure_3)",
+    )
+    args = parser.parse_args()
+
+    path_to_data = args.activations_path
+    train_layers = list(range(args.train_layers_start, args.train_layers_end))
+    test_layers = list(range(args.test_layers_start, args.test_layers_end))
+    region = args.region
 
     print("Loading activation data...")
     activations = load_activations(path_to_data)
     print(f"Loaded {len(activations)} activation files")
 
-    print(
-        f"Training classifier on layers {train_layers[0]}-{train_layers[-1]}..."
-    )
+    print(f"Training classifier on layers {train_layers[0]}-{train_layers[-1]}...")
     clf, scaler = train_classifier_on_layers(activations, train_layers, region)
 
     if clf is None:
@@ -578,13 +659,14 @@ def main():
 
     # Option 1: Clean AUC plot
     print("Option 1: Clean AUC Plot")
-    plot_clean_auc(test_layers, np.array(aucs), np.array(sems), sig_clusters)
+    plot_clean_auc(
+        test_layers, np.array(aucs), np.array(sems), sig_clusters, args.output_prefix
+    )
 
     # Option 2: Simple bias table
     print("\nOption 2: Simple Bias Table")
-    bias_data = create_simple_bias_table(
-        activations, clf, scaler, test_layers, region
-    )
+    bias_data = create_simple_bias_table(activations, clf, scaler, test_layers, region)
+    print(bias_data)
 
     # Option 3: Even simpler summary
     print("\nOption 3: Simplest Summary")

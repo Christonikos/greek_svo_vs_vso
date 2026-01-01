@@ -9,18 +9,22 @@ are significant at α = 0.05 (two‐tailed), using a conservative t‐threshold 
 
 Requires: numpy, scipy, torch, pandas, sklearn, matplotlib, mne
 """
-
-import osw
+import os
 import re
+
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
 import torch
+from mne.stats import permutation_cluster_1samp_test
 from scipy import stats
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import RobustScaler
-from sklearn.metrics import roc_auc_score
-import matplotlib.pyplot as plt
-from mne.stats import permutation_cluster_1samp_test
+
+POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
 
 
 def extract_layer_data(activation_files, layer_idx):
@@ -28,9 +32,15 @@ def extract_layer_data(activation_files, layer_idx):
     for f in activation_files:
         tokens = f["tokens"]
         clause_token_pos = next(
-            (i for i, t in enumerate(tokens) if "ÏĢÎ¿Ïħ" in t), None
+            (
+                i
+                for i, t in enumerate(tokens)
+                if any(pou_token in t for pou_token in POU_TOKENS)
+            ),
+            None,
         )
         if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
+            print("clause_token_pos not found")
             continue
 
         words = f["sentence"].split()
@@ -38,12 +48,11 @@ def extract_layer_data(activation_files, layer_idx):
         order = (
             "SVO"
             if len(after) >= 2
-            and after[0].lower()
-            in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
+            and after[0].lower() in ["ο", "η", "το", "οι", "τα", "των", "της", "του"]
             else "VSO"
         )
 
-        X = np.array(f["hidden_states"][layer_idx], dtype=float)
+        X = np.array(f["hidden_states"][layer_idx], dtype=np.float64)
         bef, aft = X[: clause_token_pos + 1], X[clause_token_pos + 1 :]
 
         def feats(mat, pfx):
@@ -62,14 +71,16 @@ def extract_layer_data(activation_files, layer_idx):
 
     if not results:
         return None
-    import pandas as pd
-
     return pd.DataFrame(results)
 
 
 def stratified_cv_auc_multifeature(df, region, return_folds=False):
     cols = [f"{region}_{stat}" for stat in ("mean", "range", "min", "max")]
     X = df[cols].values
+
+    # Clean any remaining invalid values
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
     y = (df["order"] == "SVO").astype(int).values
     if len(df) < 10 or len(np.unique(y)) < 2:
         return (np.nan, np.nan, []) if return_folds else (np.nan, np.nan)
@@ -105,12 +116,84 @@ def load_activations(path):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate Figure 1: Sentence type classification per layer with cluster-based permutation tests."
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        choices=["krikri", "gemma"],
+        default=None,
+        help="Model to use: krikri (32 layers) or gemma (48 layers). Auto-sets activations_path and n_layers.",
+    )
+    parser.add_argument(
+        "--activations_path",
+        type=str,
+        default=None,
+        help="Path to activation files directory (default: auto from --model or krikri_activations)",
+    )
+    parser.add_argument(
+        "--n_layers",
+        type=int,
+        default=None,
+        help="Number of layers in the model (default: auto from --model or 32)",
+    )
+    parser.add_argument(
+        "--n_folds",
+        type=int,
+        default=20,
+        help="Number of cross-validation folds (default: 20)",
+    )
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.01,
+        help="Significance level for cluster tests (default: 0.01)",
+    )
+    parser.add_argument(
+        "--n_permutations",
+        type=int,
+        default=5000,
+        help="Number of permutations for cluster tests (default: 5000)",
+    )
+    parser.add_argument(
+        "--output_prefix",
+        type=str,
+        default="figure_1",
+        help="Output filename prefix (default: figure_1)",
+    )
+    args = parser.parse_args()
+
+    # Handle model presets
+    MODEL_CONFIGS = {
+        "krikri": {"path": "krikri_activations", "n_layers": 32},
+        "gemma": {"path": "gemma3_12b_activations", "n_layers": 48},
+    }
+    
+    if args.model:
+        cfg = MODEL_CONFIGS[args.model]
+        path_to_data = args.activations_path or cfg["path"]
+        n_layers = args.n_layers or cfg["n_layers"]
+        output_prefix = args.output_prefix if args.output_prefix != "figure_1" else f"figure_1_{args.model}"
+    else:
+        path_to_data = args.activations_path or "krikri_activations"
+        n_layers = args.n_layers or 32
+        output_prefix = args.output_prefix
+
+    os.makedirs("figures", exist_ok=True)
+    
+    print(f"Configuration:")
+    print(f"  Activations: {path_to_data}")
+    print(f"  Layers: {n_layers}")
+    print(f"  Output: figures/{output_prefix}.pdf/png")
+    
     # ─── Settings ───────────────────────────────────────────────────────────────
-    path_to_data = os.path.join("..", "activations")
-    layers = list(range(32))
+    layers = list(range(n_layers))
     regions = ["before", "after"]
-    n_folds = 20
-    alpha = 0.01
+    n_folds = args.n_folds
+    alpha = args.alpha
     df = n_folds - 1
     # two‐tailed critical t for α=0.01:
     t_thresh = stats.t.ppf(1 - alpha / 2, df)
@@ -245,9 +328,7 @@ def main():
                 )
 
     # Chance level line
-    ax.axhline(
-        0.5, linestyle="-", color="black", linewidth=1, alpha=0.5, zorder=2
-    )
+    ax.axhline(0.5, linestyle="-", color="black", linewidth=1, alpha=0.5, zorder=2)
 
     # Proper axis settings - y-axis from 0.2 to 1
     ax.set_xlim(0, len(layers) - 1)
@@ -271,9 +352,7 @@ def main():
     ax.set_xticks(range(0, len(layers), 4))
     ax.set_xticklabels(range(0, len(layers), 4), fontsize=10, color="black")
     ax.set_yticks([0.3, 0.4, 0.6, 0.8, 1.0])
-    ax.set_yticklabels(
-        ["0.2", "0.4", "0.6", "0.8", "1.0"], fontsize=10, color="black"
-    )
+    ax.set_yticklabels(["0.2", "0.4", "0.6", "0.8", "1.0"], fontsize=10, color="black")
 
     # Create custom legend with significance
     from matplotlib.lines import Line2D
@@ -297,13 +376,9 @@ def main():
         ),
         Line2D([0], [0], color="gray", linewidth=8, label="p < 0.01"),
     ]
-    ax.legend(
-        handles=legend_elements, loc="upper right", frameon=False, fontsize=11
-    )
+    ax.legend(handles=legend_elements, loc="upper right", frameon=False, fontsize=11)
 
     # Proper despine using seaborn
-    import seaborn as sns
-
     sns.despine(ax=ax, trim=True, offset=10)
 
     # No grid
@@ -319,19 +394,20 @@ def main():
 
     # High-quality output
     plt.savefig(
-        "figure_1.pdf",
+        f"figures/{output_prefix}.pdf",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
         edgecolor="none",
     )
     plt.savefig(
-        "figure_1.png",
+        f"figures/{output_prefix}.png",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
         edgecolor="none",
     )
+    print(f"Saved: figures/{output_prefix}.pdf and figures/{output_prefix}.png")
 
     plt.show()
 
