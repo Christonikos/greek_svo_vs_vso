@@ -52,7 +52,7 @@ def extract_layer_data(activation_files, layer_idx):
             else "VSO"
         )
 
-        X = np.array(f["hidden_states"][layer_idx], dtype=np.float64)
+        X = np.array(f["hidden_states"][layer_idx], dtype=np.float32)
         bef, aft = X[: clause_token_pos + 1], X[clause_token_pos + 1 :]
 
         def feats(mat, pfx):

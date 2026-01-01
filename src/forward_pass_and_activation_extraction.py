@@ -38,7 +38,9 @@ def load_greek_sentences(csv_path="../stimuli/greek_sentences.csv"):
 
 
 def load_model_and_tokenizer(
-    model_name: str = "ilsp/Llama-Krikri-8B-Base", device: str = None
+    model_name: str = "ilsp/Llama-Krikri-8B-Base",
+    optimize_memory: bool = False,
+    device: str = None,
 ):
     """Load the HuggingFace model & tokenizer and move to appropriate device."""
     if device is None:
@@ -46,15 +48,28 @@ def load_model_and_tokenizer(
 
     print(f"Loading model '{model_name}' on device: {device}")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, output_hidden_states=True)
-    model.to(device)
+    if optimize_memory:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            output_hidden_states=True,
+        )
+        model.to(device)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            output_hidden_states=True,
+            dtype=torch.float32,
+            device_map="auto" if device == "cuda" else None,
+            low_cpu_mem_usage=True,
+        )
+
     model.eval()
 
     return model, tokenizer, device
 
 
 def extract_activations_for_sentence(
-    sentence: str, model, tokenizer, device: str = "cuda"
+    sentence: str, model, tokenizer, optimize_memory: bool, device: str = "cuda"
 ):
     """Return hidden states for the sentence."""
     # Tokenize
@@ -72,11 +87,21 @@ def extract_activations_for_sentence(
     # outputs.hidden_states -> tuple(length = num_layers + 1)
     hidden_states = outputs.hidden_states  # each tensor: (batch, seq_len, hidden_size)
 
-    # Move to CPU and half precision to save memory
-    hidden_states_cpu = [hs.squeeze(0).to("cpu").half() for hs in hidden_states]
+    for li, hs in enumerate(hidden_states):
+        if not torch.isfinite(hs).all():
+            print(f"[WARNING] Non-finite values already in hidden_states at layer {li}")
+
+    if optimize_memory:
+        # Move to CPU and half precision to save memory
+        hidden_states_cpu = [hs.squeeze(0).to("cpu").half() for hs in hidden_states]
+    else:
+        hidden_states_cpu = [
+            hs.squeeze(0).detach().to("cpu", dtype=torch.float32)
+            for hs in hidden_states
+        ]
 
     # Tokens list for reference
-    tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"].squeeze(0))
+    tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"].squeeze(0).to("cpu"))
 
     # Aggregations for quick inspection
     last_token_vec = [hs[-1] for hs in hidden_states_cpu]  # (hidden_size,)
@@ -92,7 +117,7 @@ def extract_activations_for_sentence(
 
 
 def process_and_save_activations(
-    df, model, tokenizer, device="cuda", save_dir="activations"
+    df, model, tokenizer, device="cuda", save_dir="activations", optimize_memory=True
 ):
     """Iterate over DataFrame rows, extract activations and save to disk."""
     save_path = Path(__file__).parent / save_dir
@@ -100,7 +125,7 @@ def process_and_save_activations(
 
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing sentences"):
         activations = extract_activations_for_sentence(
-            row["Sentence"], model, tokenizer, device
+            row["Sentence"], model, tokenizer, optimize_memory, device
         )
         # Save using torch.save for fidelity & compression
         torch.save(activations, save_path / f"sentence_{idx}.pt")
@@ -127,6 +152,11 @@ if __name__ == "__main__":
         default="activations",
         help="Directory to save activations",
     )
+    parser.add_argument(
+        "--optimize-memory",
+        action="store_true",
+        help="Use fp16 model + fp16 activation storage on CPU to save on mem (default: False).",
+    )
     args = parser.parse_args()
 
     df = load_greek_sentences(args.csv)
@@ -134,9 +164,16 @@ if __name__ == "__main__":
     if df is None:
         raise RuntimeError("Failed to load sentences CSV.")
 
-    model, tokenizer, device = load_model_and_tokenizer(args.model)
+    model, tokenizer, device = load_model_and_tokenizer(
+        args.model, args.optimize_memory
+    )
     process_and_save_activations(
-        df, model, tokenizer, device=device, save_dir=args.save_dir
+        df,
+        model,
+        tokenizer,
+        device=device,
+        save_dir=args.save_dir,
+        optimize_memory=args.optimize_memory,
     )
 
     print("\nActivation extraction complete.")
