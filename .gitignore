@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data files (large)
+*.pt
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+
+# Figures (generated)
+*.pdf
+*.png
+*.svg
+figures/
+src/figures/
+src/*.pdf
+src/*.png
+
+# Temporary files
+*.log
+*.tmp
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+stimuli/*.csv
+token_pos_matches.csv
+

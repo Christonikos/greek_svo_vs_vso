@@ -122,16 +122,23 @@ def main():
         description="Generate Figure 1: Sentence type classification per layer with cluster-based permutation tests."
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        choices=["krikri", "gemma"],
+        default=None,
+        help="Model to use: krikri (32 layers) or gemma (48 layers). Auto-sets activations_path and n_layers.",
+    )
+    parser.add_argument(
         "--activations_path",
         type=str,
-        default="krikri_activations",
-        help="Path to activation files directory (default: krikri_activations)",
+        default=None,
+        help="Path to activation files directory (default: auto from --model or krikri_activations)",
     )
     parser.add_argument(
         "--n_layers",
         type=int,
-        default=32,
-        help="Number of layers in the model (default: 32)",
+        default=None,
+        help="Number of layers in the model (default: auto from --model or 32)",
     )
     parser.add_argument(
         "--n_folds",
@@ -159,10 +166,31 @@ def main():
     )
     args = parser.parse_args()
 
+    # Handle model presets
+    MODEL_CONFIGS = {
+        "krikri": {"path": "krikri_activations", "n_layers": 32},
+        "gemma": {"path": "gemma3_12b_activations", "n_layers": 48},
+    }
+    
+    if args.model:
+        cfg = MODEL_CONFIGS[args.model]
+        path_to_data = args.activations_path or cfg["path"]
+        n_layers = args.n_layers or cfg["n_layers"]
+        output_prefix = args.output_prefix if args.output_prefix != "figure_1" else f"figure_1_{args.model}"
+    else:
+        path_to_data = args.activations_path or "krikri_activations"
+        n_layers = args.n_layers or 32
+        output_prefix = args.output_prefix
+
     os.makedirs("figures", exist_ok=True)
+    
+    print(f"Configuration:")
+    print(f"  Activations: {path_to_data}")
+    print(f"  Layers: {n_layers}")
+    print(f"  Output: figures/{output_prefix}.pdf/png")
+    
     # ─── Settings ───────────────────────────────────────────────────────────────
-    path_to_data = args.activations_path
-    layers = list(range(args.n_layers))
+    layers = list(range(n_layers))
     regions = ["before", "after"]
     n_folds = args.n_folds
     alpha = args.alpha
@@ -366,19 +394,20 @@ def main():
 
     # High-quality output
     plt.savefig(
-        f"figures/{args.output_prefix}.pdf",
+        f"figures/{output_prefix}.pdf",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
         edgecolor="none",
     )
     plt.savefig(
-        f"figures/{args.output_prefix}.png",
+        f"figures/{output_prefix}.png",
         dpi=300,
         bbox_inches="tight",
         facecolor="white",
         edgecolor="none",
     )
+    print(f"Saved: figures/{output_prefix}.pdf and figures/{output_prefix}.png")
 
     plt.show()
 

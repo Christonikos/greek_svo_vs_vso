@@ -54,9 +54,18 @@ def load_model_and_tokenizer(
 
 
 def extract_activations_for_sentence(
-    sentence: str, model, tokenizer, device: str = "cuda"
+    sentence: str, model, tokenizer, device: str = "cuda", precision: str = "float32"
 ):
-    """Return hidden states for the sentence."""
+    """Return hidden states for the sentence.
+    
+    Args:
+        sentence: Input sentence
+        model: HuggingFace model
+        tokenizer: HuggingFace tokenizer
+        device: Device to run on
+        precision: Storage precision - "float16" (smaller, may overflow) or "float32" (safer)
+                   NOTE: Gemma models require float32 due to large activation values
+    """
     # Tokenize
     inputs = tokenizer(sentence, return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -72,8 +81,12 @@ def extract_activations_for_sentence(
     # outputs.hidden_states -> tuple(length = num_layers + 1)
     hidden_states = outputs.hidden_states  # each tensor: (batch, seq_len, hidden_size)
 
-    # Move to CPU and half precision to save memory
-    hidden_states_cpu = [hs.squeeze(0).to("cpu").half() for hs in hidden_states]
+    # Move to CPU with specified precision
+    # WARNING: float16 can overflow for models with large activations (e.g., Gemma)
+    if precision == "float16":
+        hidden_states_cpu = [hs.squeeze(0).to("cpu").half() for hs in hidden_states]
+    else:  # float32 (default, safer)
+        hidden_states_cpu = [hs.squeeze(0).to("cpu").float() for hs in hidden_states]
 
     # Tokens list for reference
     tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"].squeeze(0))
@@ -92,15 +105,24 @@ def extract_activations_for_sentence(
 
 
 def process_and_save_activations(
-    df, model, tokenizer, device="cuda", save_dir="activations"
+    df, model, tokenizer, device="cuda", save_dir="activations", precision="float32"
 ):
-    """Iterate over DataFrame rows, extract activations and save to disk."""
+    """Iterate over DataFrame rows, extract activations and save to disk.
+    
+    Args:
+        df: DataFrame with sentences
+        model: HuggingFace model
+        tokenizer: HuggingFace tokenizer
+        device: Device to run on
+        save_dir: Directory to save activations
+        precision: Storage precision - "float16" or "float32" (default, recommended)
+    """
     save_path = Path(__file__).parent / save_dir
     save_path.mkdir(exist_ok=True)
 
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing sentences"):
         activations = extract_activations_for_sentence(
-            row["Sentence"], model, tokenizer, device
+            row["Sentence"], model, tokenizer, device, precision=precision
         )
         # Save using torch.save for fidelity & compression
         torch.save(activations, save_path / f"sentence_{idx}.pt")
@@ -127,6 +149,12 @@ if __name__ == "__main__":
         default="activations",
         help="Directory to save activations",
     )
+    parser.add_argument(
+        "--precision",
+        default="float32",
+        choices=["float16", "float32"],
+        help="Storage precision. Use float32 (default) for Gemma and other models with large activations. float16 saves space but can overflow.",
+    )
     args = parser.parse_args()
 
     df = load_greek_sentences(args.csv)
@@ -135,8 +163,13 @@ if __name__ == "__main__":
         raise RuntimeError("Failed to load sentences CSV.")
 
     model, tokenizer, device = load_model_and_tokenizer(args.model)
+    
+    print(f"\nUsing precision: {args.precision}")
+    if args.precision == "float16":
+        print("WARNING: float16 can overflow for models with large activations (e.g., Gemma)")
+    
     process_and_save_activations(
-        df, model, tokenizer, device=device, save_dir=args.save_dir
+        df, model, tokenizer, device=device, save_dir=args.save_dir, precision=args.precision
     )
 
     print("\nActivation extraction complete.")
