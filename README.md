@@ -66,6 +66,12 @@ python stimuli_creation.py --num_cells 8 --presentation_time 300 --soa 400 --out
 
 This will generate a CSV file containing all experimental sentences at the specified output location.
 
+To build larger stimuli run instead :
+
+```bash
+python stimuli_creation_large.py
+```
+
 ### Sentence Structure
 
 The script generates sentences following two possible patterns:
