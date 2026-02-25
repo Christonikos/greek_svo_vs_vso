@@ -16,7 +16,7 @@ numbers = ["sing", "plur"]
 # ~~~~~~
 # DETERMINERS, HUMANS AND ADJECTIVES
 # ~~~~~~
-humans, adj, det = [{} for i in range(0, 3)]
+humans, adj, det = [{} for _ in range(3)]
 for gender in genders:
     humans[gender] = {}
     adj[gender] = {}
@@ -67,6 +67,9 @@ human_sing_masculine = [
     "μάγειρας",
     "εργάτης",
     "υποψήφιος",
+    "ερευνητής","διευθυντής","προγραμματιστής","σκηνοθέτης",
+    "τραγουδιστής","νοσηλευτής","τεχνίτης","ζαχαροπλάστης",
+    "σερβιτόρος",
 ]
 human_plur_masculine = [
     "δάσκαλοι",
@@ -85,6 +88,9 @@ human_plur_masculine = [
     "μάγειρες",
     "εργάτες",
     "υποψήφιοι",
+    "ερευνητές","διευθυντές","προγραμματιστές","σκηνοθέτες",
+    "τραγουδιστές","νοσηλευτές","τεχνίτες","ζαχαροπλάστες",
+    "σερβιτόροι",
 ]
 
 
@@ -101,10 +107,13 @@ human_sing_feminine = [
     "κομμώτρια",
     "νοσοκόμα",
     "χορεύτρια",
-    "αθλήτρια",  # ?
+    "αθλήτρια",
     "μαγείρισσα",
     "εργάτρια",
     "υποψήφια",
+    "ερευνήτρια","διευθύντρια","προγραμματίστρια","σκηνοθέτρια",
+    "τραγουδίστρια","νοσηλεύτρια","τεχνίτρια","ζαχαροπλάστρια",
+    "σερβιτόρα",
 ]
 
 
@@ -121,36 +130,30 @@ human_plur_feminine = [
     "κομμώτριες",
     "νοσοκόμες",
     "χορεύτριες",
-    "αθλήτριες",  # ?
+    "αθλήτριες",
     "μαγείρισσες",
     "εργάτριες",
     "υποψήφιες",
+    "ερευνήτριες","διευθύντριες","προγραμματίστριες","σκηνοθέτριες",
+    "τραγουδίστριες","νοσηλεύτριες","τεχνίτριες","ζαχαροπλάστριες",
+    "σερβιτόρες",
 ]
 
 
 humans["m"]["sing"] = human_sing_masculine
 humans["m"]["plur"] = human_plur_masculine
 
-
 humans["f"]["sing"] = human_sing_feminine
 humans["f"]["plur"] = human_plur_feminine
-
 
 # ~~~~~~
 # DET
 # ~~~~~~
-det_sing_masculine = ["ο"]
-det_sing_feminime = ["η"]
-det_plur_masculine = ["οι"]
-det_plur_feminime = ["οι"]
+det["m"]["sing"] = ["ο"]
+det["m"]["plur"] = ["οι"]
 
-
-det["m"]["sing"] = det_sing_masculine
-det["m"]["plur"] = det_plur_masculine
-
-
-det["f"]["sing"] = det_sing_feminime
-det["f"]["plur"] = det_plur_feminime
+det["f"]["sing"] = ["η"]
+det["f"]["plur"] = ["οι"]
 
 
 # ~~~~~~
@@ -197,10 +200,7 @@ verb_tran_plur = [
     "εκτιμούν",
 ]
 
-verbs = {}
-for tr in ["intr", "tran"]:
-    verbs[tr] = {}
-
+verbs = {"intr": {}, "tran": {}}
 verbs["intr"]["sing"] = verb_intr_sing
 verbs["intr"]["plur"] = verb_intr_plur
 
@@ -208,10 +208,11 @@ verbs["tran"]["sing"] = verb_tran_sing
 verbs["tran"]["plur"] = verb_tran_plur
 
 
-words = {}
-words["verbs"] = verbs
-words["humans"] = humans
-words["det"] = det
-words["adj"] = adj
-words["adv"] = adv
-words["inanimate"] = inanimate
+words = {
+    "verbs":     verbs,
+    "humans":    humans,
+    "det":       det,
+    "adj":       adj,
+    "adv":       adv,
+    "inanimate": inanimate,
+}

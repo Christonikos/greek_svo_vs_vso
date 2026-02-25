@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+stimuli_creation.py
 @author: christos
 
 order = (SVO, VSO)
@@ -32,9 +33,7 @@ Things to counter-balance for:
     (e.g: forbidden to have: 
        Ο αθλητής που ο αθλητής θαυμάζει φεύγει.
        Ο αθλητής που η αθλήτρια θαυμάζει φεύγει.
-       )
-    
-        
+    )
 """
 
 # =============================================================================
@@ -42,22 +41,59 @@ Things to counter-balance for:
 # =============================================================================
 import pandas as pd
 import os
+import unicodedata
+
 import random
 from collections import Counter
 from lexicon import words
 
 
-# Function to check that N1 and N2 have different stems
-def check_n1_n2_stems(n1_index, n2_index, n_entries):
-    """
-    Ensure that N1 and N2 are different by generating a new index for N2 if necessary.
-    """
-    if n1_index == n2_index:
-        n2_index = random.choice(
-            [i for i in range(n_entries) if i != n1_index]
-        )
-    return n2_index
+def norm(s):
+    return unicodedata.normalize("NFC", str(s).strip())
 
+
+def noun_stem(noun_str):
+    """
+    Return a canonical stem key for a noun so that gendered cognates
+    (αθλητής / αθλήτρια) are treated as the same stem.
+
+    Strategy: use the position index in the masculine singular list as the
+    stem ID, since all four gender/number lists are aligned by meaning.
+    Falls back to the normalised string if the noun isn't found there.
+
+    WARNING: If you add new words to the lexicon, make sure they're added to both M/F lists
+    """
+    n = norm(noun_str)
+    # Try to find the noun's position in any gender/number list; same position
+    # across lists = same semantic entry = same stem.
+    for gen in ["m", "f"]:
+        for num in ["sing", "plur"]:
+            lst = [norm(x) for x in words["humans"][gen][num]]
+            if n in lst:
+                return lst.index(n)   # integer stem ID
+    return n   # unknown noun: use string as fallback
+
+
+# Function to check that N1 and N2 have different stems
+def check_n1_n2_stems(N1, N2):
+    """
+    Return True if N1 and N2 share a stem (cognates or identical).
+    Uses position-based stem IDs so cross-gender pairs are caught.
+    """
+    return noun_stem(N1) == noun_stem(N2)
+
+def pick_n2(N1, N2_gender, N1_number):
+    """
+    Pick an N2 that does not share a stem with N1.
+    Raises RuntimeError if no valid candidate can be found.
+    """
+    candidates = words["humans"][N2_gender][N1_number]
+    valid = [n for n in candidates if not check_n1_n2_stems(N1, n)]
+    if not valid:
+        raise RuntimeError(
+            f"No valid N2 candidate for N1='{N1}' with gender={N2_gender}, number={N1_number}."
+        )
+    return random.choice(valid)
 
 # Define a class to handle the experiment configuration and calculations
 class Experiment:
@@ -68,6 +104,7 @@ class Experiment:
         soa,
         question_display_time,
         response_time,
+        seed
     ):
         self.num_cells = num_cells
         self.presentation_time = presentation_time
@@ -75,6 +112,8 @@ class Experiment:
         self.question_display_time = question_display_time
         self.response_time = response_time
         self.words_per_sentence = 7
+        self.seed = seed
+        random.seed(seed)
 
     # Function to generate sentence structures based on given parameters with detailed metadata
     def generate_sentence_structure_with_detailed_metadata(
@@ -99,12 +138,7 @@ class Experiment:
 
         # Get nouns
         N1 = random.choice(words["humans"][N1_gender][N1_number])
-        N2_index = check_n1_n2_stems(
-            words["humans"][N1_gender][N1_number].index(N1),
-            random.randint(0, len(words["humans"][N2_gender][N1_number]) - 1),
-            len(words["humans"][N2_gender][N1_number]),
-        )
-        N2 = words["humans"][N2_gender][N1_number][N2_index]
+        N2 = pick_n2(N1, N2_gender, N1_number)
 
         # Always use transitive verb for V1 and intransitive verb for V2
         verb_trans = random.choice(words["verbs"]["tran"][N1_number])
@@ -135,43 +169,47 @@ class Experiment:
             "N2_gender": N2_gender,
             "correct_response": correct_response,
             "false_response": false_response,
+            "N1_noun":          N1,
+            "N2_noun":          N2,
+            "V1":               verb_trans,
+            "V2":               verb_intrans,
         }
 
         return sentence, question, metadata
 
-    def generate_cell(self):
+    def generate_cell(self, seen_sentences: set):
         balanced_sentences_detailed_metadata = []
         orders = ["SVO", "VSO"]
         questions_for = ["V1", "V2"]
         numbers = ["sing", "plur"]
         genders = ["m", "f"]
-
         for order in orders:
             for question_for in questions_for:
                 for number in numbers:
                     for N1_gender in genders:
                         for N2_gender in genders:
-                            sentence, question, metadata = (
-                                self.generate_sentence_structure_with_detailed_metadata(
-                                    order,
-                                    question_for,
-                                    number,
-                                    N1_gender,
-                                    N2_gender,
+                            # Make sure sentences are unique
+                            for attempt in range(200):
+                                sentence, question, metadata = (
+                                    self.generate_sentence_structure_with_detailed_metadata(
+                                        order, question_for, number, N1_gender, N2_gender
+                                    )
                                 )
-                            )
-                            balanced_sentences_detailed_metadata.append(
-                                (sentence, question, metadata)
-                            )
+                                if sentence not in seen_sentences:
+                                    break
+                            seen_sentences.add(sentence)
+                            balanced_sentences_detailed_metadata.append((sentence, question, metadata))
+                            
 
         # Shuffle sentences to introduce non-repetition across cells
         random.shuffle(balanced_sentences_detailed_metadata)
         return balanced_sentences_detailed_metadata
 
     def generate_multiple_cells(self):
+        seen_sentences = set()         
         all_cells = []
         for _ in range(self.num_cells):
-            cell = self.generate_cell()
+            cell = self.generate_cell(seen_sentences)
             all_cells.append(cell)
 
         return all_cells
@@ -257,7 +295,6 @@ class Experiment:
         print(
             f"  - Maximum total duration of the experiment: {max_experiment_duration_minutes:.2f} minutes"
         )
-
         # Print trials per category to ensure everything is counterbalanced
         print("\nTrials per category (counterbalanced):")
         for category, counts in trials_per_category.items():
@@ -266,9 +303,7 @@ class Experiment:
     def create_dataframe(self, all_cells):
         # Flatten the list of cells to create a DataFrame
         data = [item for cell in all_cells for item in cell]
-
         df = pd.DataFrame(data, columns=["Sentence", "Question", "Metadata"])
-
         # Separate metadata into columns
         df = pd.concat(
             [
@@ -277,15 +312,28 @@ class Experiment:
             ],
             axis=1,
         )
-
         return df
 
-    def store_dataframe(self, df_all_cells):
-        path_to_stimuli = os.path.join("..", "..", "stimuli")
-        if not os.path.exists(path_to_stimuli):
-            os.makedirs(path_to_stimuli)
-        fname = os.path.join(path_to_stimuli, "greek_sentences.csv")
-        df_all_cells.to_csv(fname)
+
+def validate(df):
+    # No duplicate sentences
+    n_dupes = df["Sentence"].duplicated().sum()
+    assert n_dupes == 0, f"Found {n_dupes} duplicate sentences!"
+
+    # No same-stem N1/N2
+    bad = df.apply(lambda r: check_n1_n2_stems(r["N1_noun"], r["N2_noun"]), axis=1).sum()
+    assert bad == 0, f"Found {bad} rows where N1 and N2 share a stem!"
+
+    # Perfectly balanced 32 cells
+    cell_counts = df.groupby(
+        ["order", "question_for", "N1_number", "N1_gender", "N2_gender"]
+    ).size()
+    assert cell_counts.min() == cell_counts.max(), (
+        f"Cells not equal-sized: min={cell_counts.min()}, max={cell_counts.max()}"
+    )
+
+    print(f"\nValidation passed: {len(df)} sentences, "
+          f"{int(cell_counts.min())} per condition cell, no duplicates, no same-stem pairs.")
 
 
 # %%
@@ -296,13 +344,18 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Generate counterbalanced Greek sentence stimuli for SVO/VSO word order experiments."
+        description="Generate counterbalanced Greek sentence stimuli for SVO/VSO word order experiments\n"
+            "Total sentences = 32 condition cells × num_cells.\n"
+            "  num_cells=16 →  512 sentences  (recommended minimum for 20-fold CV)\n"
+            "  num_cells=32 → 1024 sentences\n"
+            "  num_cells=4  →  128 sentences  (quick test)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--num_cells",
         type=int,
-        default=4,
-        help="Number of experimental cells (default: 4)",
+        default=32,
+        help="Number of experimental cells (default: 32)",
     )
     parser.add_argument(
         "--presentation_time",
@@ -340,6 +393,8 @@ def main():
         default="greek_sentences.csv",
         help="Output CSV filename (default: greek_sentences.csv)",
     )
+    parser.add_argument("--seed",                  type=int, default=42,
+                        help="Random seed for reproducibility (default: 42)")
     args = parser.parse_args()
 
     experiment = Experiment(
@@ -348,19 +403,20 @@ def main():
         soa=args.soa,
         question_display_time=args.question_display_time,
         response_time=args.response_time,
+        seed=args.seed
     )
 
-    print("Generating stimuli...")
+    print("Generating stimuli (seed={args.seed})...")
     all_cells = experiment.generate_multiple_cells()
     experiment.print_summary(all_cells)
 
     # Create and inspect the DataFrame
     df_all_cells = experiment.create_dataframe(all_cells)
-    
+    validate(df_all_cells)
+
     # Store the dataframe
     path_to_stimuli = args.output_dir
-    if not os.path.exists(path_to_stimuli):
-        os.makedirs(path_to_stimuli)
+    os.makedirs(path_to_stimuli, exist_ok=True)
     fname = os.path.join(path_to_stimuli, args.output_filename)
     df_all_cells.to_csv(fname)
     print(f"\nStimuli saved to: {fname}")
