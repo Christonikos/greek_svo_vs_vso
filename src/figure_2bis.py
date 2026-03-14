@@ -17,15 +17,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from mne.stats import permutation_cluster_1samp_test
 from mne.decoding import LinearModel
+from mne.stats import permutation_cluster_1samp_test
 from scipy import sparse, stats
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import RobustScaler
 
-from coefficient_geometry import get_rotation_angle_matrix, compute_feature_density
+from coefficient_geometry import compute_feature_density, get_rotation_angle_matrix
 
 POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
 
@@ -122,13 +122,12 @@ def compute_gat_folds(df, layers, region_prefix="aft", n_splits=20):
     samples = df["file_id"].unique()
     n_samples = len(samples)
     n_layers = len(layers)
-    n_units = 4 # mean, var, kurtosis, skewness
+    n_units = 4  # mean, var, kurtosis, skewness
     feats_arr = np.zeros((n_samples, n_layers, 4), dtype=np.float64)
     labels = np.zeros(n_samples, dtype=int)
 
     # build a map file_id -> row index
     id2idx = {fid: idx for idx, fid in enumerate(samples)}
-
 
     for _, row in df.iterrows():
         sidx = id2idx[row["file_id"]]
@@ -457,8 +456,8 @@ def plot_gat_with_clusters(results, layers, output_prefix):
 def plot_angle_matrix(angle_matrix, layers, output_prefix):
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
-    vmin=0
-    vmax=np.pi #/2 
+    vmin = 0
+    vmax = np.pi  # /2
 
     im = ax.imshow(
         angle_matrix,
@@ -474,14 +473,14 @@ def plot_angle_matrix(angle_matrix, layers, output_prefix):
     cbar.set_label("Rotation Angle (rad)", rotation=270, labelpad=20, fontsize=12)
     # cbar.set_ticks([0, np.pi/4, np.pi/2])
     # cbar.set_ticklabels(['0', r'$\frac{\pi}{4}$', r'$\frac{\pi}{2}$'])
-    cbar.set_ticks([0, np.pi/2, np.pi])
-    cbar.set_ticklabels(['0', r'$\frac{\pi}{2}$', r'$\pi$'])
+    cbar.set_ticks([0, np.pi / 2, np.pi])
+    cbar.set_ticklabels(["0", r"$\frac{\pi}{2}$", r"$\pi$"])
     cbar.ax.tick_params(labelsize=18)
 
     # isoline at np.pi/4
     ax.contour(
         angle_matrix,
-        levels=[np.pi/4],
+        levels=[np.pi / 4],
         colors=["white"],
         linewidths=2,
         linestyles="--",
@@ -491,7 +490,7 @@ def plot_angle_matrix(angle_matrix, layers, output_prefix):
     # isoline at np.pi/2
     ax.contour(
         angle_matrix,
-        levels=[np.pi/2],
+        levels=[np.pi / 2],
         colors=["red"],
         linewidths=2,
         linestyles="--",
@@ -572,7 +571,7 @@ def plot_density(density, layers, output_prefix):
 
 
 def plot_coefficients(coeffs, layers, output_prefix):
-    """ Imshow of coefficients
+    """Imshow of coefficients
     X axis = layers
     Y axis = the 4 coefficients (mean, var, kurtosis, skewness)
     """
@@ -701,7 +700,6 @@ def main():
 
     print("Plotting results...")
     plot_gat_with_clusters(results, layers, args.output_prefix)
-
 
     print("Computing angles and feature density from patterns")
     angles = get_rotation_angle_matrix(patterns)

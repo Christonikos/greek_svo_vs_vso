@@ -5,46 +5,46 @@ stimuli_creation.py
 @author: christos
 
 order = (SVO, VSO)
-question_for = (V1, V2) #transitive, intransitive 
+question_for = (V1, V2) #transitive, intransitive
 N1_number = (singular, plural)
 
-* There are no number-incongruent cases 
-(e.g: it's always either S-S or P-P never S-P or P-S) because forming 
+* There are no number-incongruent cases
+(e.g: it's always either S-S or P-P never S-P or P-S) because forming
  a question without providing an answer becomes hard (ποιος/ποιοι).
 
 Prototypes:
-    1. Det N1 whom Det N2 V_transitive V_intransitive. 
-    1. Det N1 whom V_transitive Det N2  V_intransitive. 
-    
-Examples:    
-    
+    1. Det N1 whom Det N2 V_transitive V_intransitive.
+    1. Det N1 whom V_transitive Det N2  V_intransitive.
+
+Examples:
+
     1. Ο αθλητής που ο γυμναστής θαυμάζει φεύγει. --> Ποιος θαυμάζει? (V1)
     2. Ο αθλητής που θαυμάζει ο γυμναστής φεύγει. --> Ποιος θαυμάζει? (V1)
     3. Ο αθλητής που ο γυμναστής θαυμάζει φεύγει. --> Ποιος φεύγει? (V2)
     4. Ο αθλητής που θαυμάζει ο γυμναστής φεύγει. --> Ποιος φεύγει? (V2)
 
-Things to counter-balance for: 
+Things to counter-balance for:
     1. Order (as many SVOs as VSOs)
     2. Question_for (as many V1 questions as V2)
     3. N1 number (as many Singular as Plural)
     4. N1,N2 gender (as many masculine N1 as feminine)
     5. N1,N2 congruency (as many M-M, F-F, M-F, F-M)
-    6. N1 and N2 must be of a different stem 
-    (e.g: forbidden to have: 
+    6. N1 and N2 must be of a different stem
+    (e.g: forbidden to have:
        Ο αθλητής που ο αθλητής θαυμάζει φεύγει.
        Ο αθλητής που η αθλήτρια θαυμάζει φεύγει.
     )
 """
 
+import os
+import random
+import unicodedata
+from collections import Counter
+
 # =============================================================================
 # MODULES
 # =============================================================================
 import pandas as pd
-import os
-import unicodedata
-
-import random
-from collections import Counter
 from lexicon import words
 
 
@@ -70,8 +70,8 @@ def noun_stem(noun_str):
         for num in ["sing", "plur"]:
             lst = [norm(x) for x in words["humans"][gen][num]]
             if n in lst:
-                return lst.index(n)   # integer stem ID
-    return n   # unknown noun: use string as fallback
+                return lst.index(n)  # integer stem ID
+    return n  # unknown noun: use string as fallback
 
 
 # Function to check that N1 and N2 have different stems
@@ -81,6 +81,7 @@ def check_n1_n2_stems(N1, N2):
     Uses position-based stem IDs so cross-gender pairs are caught.
     """
     return noun_stem(N1) == noun_stem(N2)
+
 
 def pick_n2(N1, N2_gender, N1_number):
     """
@@ -95,6 +96,7 @@ def pick_n2(N1, N2_gender, N1_number):
         )
     return random.choice(valid)
 
+
 # Define a class to handle the experiment configuration and calculations
 class Experiment:
     def __init__(
@@ -104,7 +106,7 @@ class Experiment:
         soa,
         question_display_time,
         response_time,
-        seed
+        seed,
     ):
         self.num_cells = num_cells
         self.presentation_time = presentation_time
@@ -169,10 +171,10 @@ class Experiment:
             "N2_gender": N2_gender,
             "correct_response": correct_response,
             "false_response": false_response,
-            "N1_noun":          N1,
-            "N2_noun":          N2,
-            "V1":               verb_trans,
-            "V2":               verb_intrans,
+            "N1_noun": N1,
+            "N2_noun": N2,
+            "V1": verb_trans,
+            "V2": verb_intrans,
         }
 
         return sentence, question, metadata
@@ -192,21 +194,26 @@ class Experiment:
                             for attempt in range(200):
                                 sentence, question, metadata = (
                                     self.generate_sentence_structure_with_detailed_metadata(
-                                        order, question_for, number, N1_gender, N2_gender
+                                        order,
+                                        question_for,
+                                        number,
+                                        N1_gender,
+                                        N2_gender,
                                     )
                                 )
                                 if sentence not in seen_sentences:
                                     break
                             seen_sentences.add(sentence)
-                            balanced_sentences_detailed_metadata.append((sentence, question, metadata))
-                            
+                            balanced_sentences_detailed_metadata.append(
+                                (sentence, question, metadata)
+                            )
 
         # Shuffle sentences to introduce non-repetition across cells
         random.shuffle(balanced_sentences_detailed_metadata)
         return balanced_sentences_detailed_metadata
 
     def generate_multiple_cells(self):
-        seen_sentences = set()         
+        seen_sentences = set()
         all_cells = []
         for _ in range(self.num_cells):
             cell = self.generate_cell(seen_sentences)
@@ -244,9 +251,7 @@ class Experiment:
 
         # Convert duration from ms to seconds and minutes for readability
         max_experiment_duration_seconds = max_experiment_duration / 1000.0
-        max_experiment_duration_minutes = (
-            max_experiment_duration_seconds / 60.0
-        )
+        max_experiment_duration_minutes = max_experiment_duration_seconds / 60.0
 
         # Count occurrences for each category using separate counters
         order_counter = Counter()
@@ -265,9 +270,7 @@ class Experiment:
 
         # Calculate trials per category
         trials_per_category = {
-            "Order (SVO/VSO)": {
-                k: v // num_cells for k, v in order_counter.items()
-            },
+            "Order (SVO/VSO)": {k: v // num_cells for k, v in order_counter.items()},
             "QuestionFor (V1/V2)": {
                 k: v // num_cells for k, v in question_for_counter.items()
             },
@@ -321,19 +324,23 @@ def validate(df):
     assert n_dupes == 0, f"Found {n_dupes} duplicate sentences!"
 
     # No same-stem N1/N2
-    bad = df.apply(lambda r: check_n1_n2_stems(r["N1_noun"], r["N2_noun"]), axis=1).sum()
+    bad = df.apply(
+        lambda r: check_n1_n2_stems(r["N1_noun"], r["N2_noun"]), axis=1
+    ).sum()
     assert bad == 0, f"Found {bad} rows where N1 and N2 share a stem!"
 
     # Perfectly balanced 32 cells
     cell_counts = df.groupby(
         ["order", "question_for", "N1_number", "N1_gender", "N2_gender"]
     ).size()
-    assert cell_counts.min() == cell_counts.max(), (
-        f"Cells not equal-sized: min={cell_counts.min()}, max={cell_counts.max()}"
-    )
+    assert (
+        cell_counts.min() == cell_counts.max()
+    ), f"Cells not equal-sized: min={cell_counts.min()}, max={cell_counts.max()}"
 
-    print(f"\nValidation passed: {len(df)} sentences, "
-          f"{int(cell_counts.min())} per condition cell, no duplicates, no same-stem pairs.")
+    print(
+        f"\nValidation passed: {len(df)} sentences, "
+        f"{int(cell_counts.min())} per condition cell, no duplicates, no same-stem pairs."
+    )
 
 
 # %%
@@ -345,10 +352,10 @@ def main():
 
     parser = argparse.ArgumentParser(
         description="Generate counterbalanced Greek sentence stimuli for SVO/VSO word order experiments\n"
-            "Total sentences = 32 condition cells × num_cells.\n"
-            "  num_cells=16 →  512 sentences  (recommended minimum for 20-fold CV)\n"
-            "  num_cells=32 → 1024 sentences\n"
-            "  num_cells=4  →  128 sentences  (quick test)",
+        "Total sentences = 32 condition cells × num_cells.\n"
+        "  num_cells=16 →  512 sentences  (recommended minimum for 20-fold CV)\n"
+        "  num_cells=32 → 1024 sentences\n"
+        "  num_cells=4  →  128 sentences  (quick test)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -393,8 +400,12 @@ def main():
         default="greek_sentences.csv",
         help="Output CSV filename (default: greek_sentences.csv)",
     )
-    parser.add_argument("--seed",                  type=int, default=42,
-                        help="Random seed for reproducibility (default: 42)")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility (default: 42)",
+    )
     args = parser.parse_args()
 
     experiment = Experiment(
@@ -403,7 +414,7 @@ def main():
         soa=args.soa,
         question_display_time=args.question_display_time,
         response_time=args.response_time,
-        seed=args.seed
+        seed=args.seed,
     )
 
     print("Generating stimuli (seed={args.seed})...")

@@ -29,6 +29,8 @@ POU_TOKENS = ["ĠÏĢÎ¿Ïħ", "▁που"]
 
 def extract_layer_data(activation_files, layer_idx):
     results = []
+    COUNTER_NONE = 0
+    COUNTER_EOB = 0
     for f in activation_files:
         tokens = f["tokens"]
         clause_token_pos = next(
@@ -40,7 +42,13 @@ def extract_layer_data(activation_files, layer_idx):
             None,
         )
         if clause_token_pos is None or clause_token_pos >= len(tokens) - 1:
-            print("clause_token_pos not found")
+            if not clause_token_pos:
+                print("clause_token_pos not found")
+                COUNTER_NONE += 1
+            else:
+                print("clause_token_pos was at the end")
+                COUNTER_EOB += 1
+                print(tokens)
             continue
 
         words = f["sentence"].split()
@@ -71,6 +79,7 @@ def extract_layer_data(activation_files, layer_idx):
 
     if not results:
         return None
+    print(COUNTER_NONE, COUNTER_EOB)
     return pd.DataFrame(results)
 
 
