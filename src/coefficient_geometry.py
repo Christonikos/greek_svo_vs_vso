@@ -1,7 +1,7 @@
 import numpy as np
-from scipy.stats import ttest_rel, ttest_1samp
-from statsmodels.stats.multitest import fdrcorrection
 from scipy.spatial.distance import cosine
+from scipy.stats import ttest_1samp, ttest_rel
+from statsmodels.stats.multitest import fdrcorrection
 
 
 def focus_on_decision_subspace(
@@ -40,15 +40,21 @@ def focus_on_decision_subspace(
     """
     x = np.asarray(subject_patterns)
     if x.ndim != 3:
-        raise ValueError(f"`subject_patterns` must be 3D (subjects, times, sensors), got shape {x.shape}.")
+        raise ValueError(
+            f"`subject_patterns` must be 3D (subjects, times, sensors), got shape {x.shape}."
+        )
 
     n_subjects, n_times, n_sensors = x.shape
     if n_subjects < 2:
         raise ValueError("Paired t-test across subjects requires at least 2 subjects.")
     if not isinstance(t_baseline, (int, np.integer)):
-        raise TypeError(f"`t_baseline` must be an int, got {type(t_baseline).__name__}.")
+        raise TypeError(
+            f"`t_baseline` must be an int, got {type(t_baseline).__name__}."
+        )
     if not (1 <= t_baseline < n_times):
-        raise ValueError(f"`t_baseline` must satisfy 1 <= t_baseline < n_times. Got {t_baseline}, n_times={n_times}.")
+        raise ValueError(
+            f"`t_baseline` must satisfy 1 <= t_baseline < n_times. Got {t_baseline}, n_times={n_times}."
+        )
 
     # --- Selection rule (as given) ---
     baseline_avg = x[:, :t_baseline, :].mean(axis=1)  # (subjects, sensors)
@@ -78,8 +84,10 @@ def focus_on_decision_subspace(
 
     if selected_idx.size == 0:
         # warn and return empty array with correct shape
-        print("No sensors selected (empty decision subspace). "
-            "Try alpha=0.1, correction=None, or verify patterns differ from baseline.")
+        print(
+            "No sensors selected (empty decision subspace). "
+            "Try alpha=0.1, correction=None, or verify patterns differ from baseline."
+        )
         focused = x[..., :0]
         return (focused, selected_idx, pvals_corr) if return_indices else focused
 
@@ -121,11 +129,15 @@ def compute_feature_density(
     """
     x = np.asarray(subject_patterns)
     if x.ndim != 3:
-        raise ValueError(f"`subject_patterns` must be 3D (subjects, times, sensors), got shape {x.shape}.")
+        raise ValueError(
+            f"`subject_patterns` must be 3D (subjects, times, sensors), got shape {x.shape}."
+        )
 
     n_subjects, n_times, n_sensors = x.shape
     if n_subjects < 2:
-        raise ValueError("One-sample t-test across subjects requires at least 2 subjects.")
+        raise ValueError(
+            "One-sample t-test across subjects requires at least 2 subjects."
+        )
 
     # p-values per timepoint & sensor
     p_values = np.empty((n_times, n_sensors), dtype=float)
@@ -150,7 +162,9 @@ def compute_feature_density(
                 p_values[t] = pvals_adj
 
             else:
-                raise ValueError("`correction` must be one of: None, 'fdr', 'bonferroni'.")
+                raise ValueError(
+                    "`correction` must be one of: None, 'fdr', 'bonferroni'."
+                )
 
         sig_mask[t] = passed
 
@@ -183,7 +197,7 @@ def get_rotation_angle_matrix(patterns):
     for t1 in range(n_times):
         w1 = patterns[t1]
         for t2 in range(n_times):
-            w2 = patterns[t2]           
+            w2 = patterns[t2]
             cos_dist = cosine(w1, w2)
             angle = np.arccos(1 - cos_dist)
             angle_matrix[t1, t2] = angle
